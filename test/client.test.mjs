@@ -205,6 +205,7 @@ test("provider routes map to the three quota providers", () => {
 	assert.equal(exports.usageProviderFor("opencode-go"), "opencode-go");
 	assert.equal(exports.usageProviderFor("opencode"), "opencode-go");
 	assert.equal(exports.usageProviderFor("zai-coding-cn"), "glm");
+	assert.equal(exports.usageProviderFor("z-ai"), "glm");
 	assert.equal(exports.usageProviderFor("command-code"), "command-code");
 	assert.equal(exports.usageProviderFor("commandcode"), "command-code");
 	assert.equal(exports.usageProviderFor("deepseek-official"), null);
