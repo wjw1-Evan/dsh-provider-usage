@@ -1,0 +1,36 @@
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # npm trusted publishing (OIDC): the job proves its identity to npm without a
+  # long-lived token. Also required for --provenance.
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Install
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Test
+        run: npm test
+      - name: Publish
+        # Trusted publishing needs no token; NPM_TOKEN is the fallback for
+        # installs where the OIDC publisher is not configured on npmjs.com.
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
