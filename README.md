@@ -78,16 +78,22 @@ panel settings page — extended from one provider to three.
 
 ## Install
 
-From a checkout:
+From npm:
 
 ```bash
-dsh plugin --profile desktop add /path/to/dsh-provider-usage
+dsh plugin --profile desktop add dsh-multi-provider-usage
 ```
 
 or, for the web profile:
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-provider-usage
+dsh plugin --profile web add dsh-multi-provider-usage
+```
+
+From a checkout (for development):
+
+```bash
+dsh plugin --profile desktop add /path/to/dsh-provider-usage
 ```
 
 The package declares `dsh.bundle.patch`, so the CLI reconciles it into the

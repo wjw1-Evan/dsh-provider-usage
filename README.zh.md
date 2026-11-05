@@ -62,7 +62,13 @@
 
 ## 安装
 
-从本地 checkout 安装：
+从 npm 安装：
+
+```bash
+dsh plugin --profile desktop add dsh-multi-provider-usage
+```
+
+开发时也可以直接从本地 checkout 安装：
 
 ```bash
 dsh plugin --profile desktop add /path/to/dsh-provider-usage
