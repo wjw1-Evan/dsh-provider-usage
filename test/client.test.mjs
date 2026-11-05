@@ -160,6 +160,8 @@ test("all providers render in one column and each header collapses independently
 		autoUpdate: { status: "updated", restartRequired: true, version: "0.3.1" }
 	};
 	data.providers[0].fallback = { from: "opencode-go", reason: "not-installed", message: "fixture" };
+	data.providers[1].account = { name: "Evan", ref: "REF", id: null };
+	data.providers[1].plan = { id: "individual-goat", name: "GOAT", status: "active" };
 	react.reset();
 	react.seed(0, data);
 	react.seed(1, null);
@@ -177,7 +179,7 @@ test("all providers render in one column and each header collapses independently
 	assert.equal(head.props.className, "dpu-provider-head");
 	assert.equal(head.props["aria-expanded"], true);
 	assert.match(JSON.stringify(head), /dpu-badge/, "the fallback badge belongs in the header");
-	assert.doesNotMatch(JSON.stringify(firstSection.props.children[1]), /dpu-badge/, "the fallback badge must not wrap to the body");
+	assert.doesNotMatch(JSON.stringify(firstSection.props.children[1]), /dpu-sub/, "metadata must not wrap to a second line");
 	assert.ok(firstSection.props.children[1] !== null, "expanded by default");
 
 	head.props.onClick();
@@ -186,6 +188,10 @@ test("all providers render in one column and each header collapses independently
 	const secondProviders = second.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
 	assert.equal(secondProviders.props.children[0].props.children[1], null, "clicked header collapsed only its body");
 	assert.ok(secondProviders.props.children[1].props.children[1] !== null, "sibling stays expanded");
+	const ccHead = secondProviders.props.children[1].props.children[0];
+	assert.match(JSON.stringify(ccHead), /dpu-account/);
+	assert.match(JSON.stringify(ccHead), /dpu-plan/);
+	assert.match(JSON.stringify(ccHead), /GOAT/);
 });
 
 test("balance deltas are computed from the turn-start snapshot", () => {
