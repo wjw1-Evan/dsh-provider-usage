@@ -155,7 +155,7 @@ export function installWire(options = {}) {
 		const record = { url, method: init?.method ?? "GET", headers: new Headers(init?.headers) };
 		requests.push(record);
 		if (url.includes("registry.npmjs.org")) return jsonResponse(state.registry);
-		if (url.includes("opencode.ai/console/api/billing/status")) {
+		if (url.includes("/console/api/billing/status")) {
 			if (state.console === null) return jsonResponse({ _tag: "Forbidden" }, 403);
 			return jsonResponse(state.console);
 		}

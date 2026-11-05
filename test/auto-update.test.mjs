@@ -314,6 +314,43 @@ test("a market-installed copy updates itself from the release tarball", async ()
 	}
 });
 
+test("a release this session already applied is not re-downloaded until restart", async () => {
+	const dir = packageDir();
+	const tarball = releaseTarball("0.3.0");
+	const tarballDownloads = [];
+	const updater = startAutoUpdate({
+		packageDir: dir,
+		profileDir: "/tmp/profile",
+		packageName: "dsh-multi-provider-usage",
+		currentVersion: "0.2.5",
+		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
+		fetchImpl: async (url) => {
+			if (String(url).includes("releases/latest")) {
+				return { ok: true, json: async () => ({ tag_name: "v0.3.0", tarball_url: "https://example.test/tarball.tar.gz" }) };
+			}
+			tarballDownloads.push(String(url));
+			return { ok: true, arrayBuffer: async () => tarball };
+		},
+		execImpl: async () => { throw new Error("must not run git"); },
+		timers,
+		detect: () => ({ kind: "package", checkout: null }),
+		now: () => 2_000_000
+	});
+	try {
+		const first = await updater.checkNow(true);
+		assert.equal(first.status, "updated");
+		assert.equal(tarballDownloads.length, 1, "the first check downloads the tarball once");
+
+		const second = await updater.checkNow(true);
+		assert.equal(second.status, "updated", "the restart notice stays up");
+		assert.equal(second.restartRequired, true, "the restart notice stays up");
+		assert.equal(tarballDownloads.length, 1, "the same release is not re-downloaded");
+	} finally {
+		updater.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("a failed self-update leaves an actionable notice instead of a broken install", async () => {
 	const dir = packageDir();
 	const updater = startAutoUpdate({

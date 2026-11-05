@@ -34,6 +34,8 @@ function installHooks() {
 		reset() { cursor = 0; states.length = 0; },
 		rewind() { cursor = 0; },
 		seed(index, value) { states[index] = value; },
+		/** Read one state slot without re-rendering (assertions). */
+		peek(index) { return states[index]; },
 		useState(initial) {
 			const index = cursor++;
 			if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
@@ -67,6 +69,18 @@ function loadExports() {
 		if (specifier === "react/jsx-runtime") return jsxRuntime;
 		throw new Error(specifier);
 	});
+}
+
+/** Collect every element of one component type in a rendered element tree. */
+function findType(node, type, found = []) {
+	if (!node || typeof node !== "object") return found;
+	if (Array.isArray(node)) {
+		for (const child of node) findType(child, type, found);
+		return found;
+	}
+	if (node.type === type) found.push(node);
+	if (node.props && node.props.children !== undefined) findType(node.props.children, type, found);
+	return found;
 }
 
 test("the bundle registers under the package name", () => {
@@ -178,7 +192,7 @@ test("all providers render in one column and each header collapses independently
 	const first = exports.Widget({ wide: true, t: (key) => key });
 	const providers = first.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
 	assert.equal(providers.props.children.length, 3);
-	const names = providers.props.children.map((section) => section.props.children[0].props.children[2].props.children);
+	const names = providers.props.children.map((section) => section.props.children[0].props.children[1].props.children);
 	assert.deepEqual(names, ["OpenCode GO", "Command Code", "GLM Code Plan"]);
 	assert.match(JSON.stringify(first), /autoUpdate\.updated/);
 	const firstSection = providers.props.children[0];
@@ -255,7 +269,7 @@ test("a missing console credential renders a clickable balance setup chip", () =
 	assert.equal(chip.props.role, "button", "the chip is exposed as a button");
 	assert.equal(chip.props.tabIndex, 0, "the chip is keyboard reachable");
 	assert.equal(chip.props.children, "balance.setup");
-	assert.equal(chip.props.title, "balance.setup.title");
+	assert.match(chip.props.title, /^balance\.setup\.title/, "the tooltip explains the fix");
 
 	// The click must not bubble into the header's collapse toggle.
 	let stopped = 0;
@@ -274,6 +288,52 @@ test("a missing console credential renders a clickable balance setup chip", () =
 	assert.match(ccTree, /dpu-provider-balance dpu-muted/);
 	assert.match(ccTree, /balance\.none\.title/);
 	assert.doesNotMatch(ccTree, /dpu-balance-setup/);
+});
+
+test("the host balanceSetup marker renders the setup chip for an API-key login", () => {
+	const exports = loadExports();
+	const ctx = {
+		effect: (fn) => { fn(); return () => {}; },
+		locale: { register: () => () => {} },
+		slots: {
+			inject: (_name, callback) => { callback(); },
+			register: () => () => {}
+		},
+		get: () => undefined
+	};
+	exports.apply(ctx);
+
+	const data = {
+		providers: [{
+			id: "opencode-go",
+			name: "OpenCode GO",
+			status: "ok",
+			account: { name: "", ref: "REF", id: null },
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [{ key: "rolling", labelKey: "window.five-hour", percent: 10, status: "ok", resetsAt: null, windowMs: null }],
+			meta: {
+				balanceSetup: "api-key",
+				balanceError: "OpenCode balance: the local OpenCode login is an API key, not an OpenCode Console session"
+			}
+		}],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+
+	const widget = exports.Widget({ wide: true, t: (key) => key });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const head = providers.props.children[0].props.children[0];
+	const chip = head.props.children.find((child) => child && child.props && child.props.className === "dpu-balance-setup");
+	assert.ok(chip !== undefined, "an API-key-only login is actionable, not a mute dash");
+	assert.equal(chip.props.children, "balance.setup");
+	assert.match(chip.props.title, /API key/, "the tooltip carries the host explanation");
+	assert.doesNotMatch(JSON.stringify(head), /dpu-provider-balance dpu-muted/, "it is not rendered as a balance error");
 });
 
 test("a credits response without top-up pools renders a no-top-up badge", () => {
@@ -378,13 +438,14 @@ test("the GLM card on the settings page carries the referral link", () => {
 		glmApiKeyEnv: "ZAI_API_KEY",
 		providerOrder: ["opencode-go", "command-code", "glm"]
 	};
-	// SettingsPage hooks: state, form, busy, message, draggingId, then two refs.
+	// SettingsPage hooks: state, form, busy, message, draggingId, usage, then refs.
 	react.reset();
 	react.seed(0, { phase: "ready", revision: 3, value: value, detection: null, error: null });
 	react.seed(1, value);
 	react.seed(2, { save: false, reload: false });
 	react.seed(3, null);
 	react.seed(4, null);
+	react.seed(5, { phase: "idle", data: null, error: null });
 
 	const page = exports.SettingsPage({ t: (key) => key });
 	const tree = JSON.stringify(page);
@@ -416,10 +477,58 @@ test("the settings page explains how to enable the balance when it is missing", 
 		react.seed(2, { save: false, reload: false });
 		react.seed(3, null);
 		react.seed(4, null);
-		return JSON.stringify(exports.SettingsPage({ t: (key) => key }));
+		return exports.SettingsPage({ t: (key) => key });
 	};
-	assert.match(render({ configured: false, source: null }), /cfg\.console\.hint/, "an unconfigured balance links the fix on the same card");
-	assert.doesNotMatch(render({ configured: true, source: "opencode-db" }), /cfg\.console\.hint/, "a working balance hides the hint");
+	const guide = (consoleInfo) => findType(render(consoleInfo), exports.ConsoleGuide);
+	// An unconfigured or fixable balance mounts the step-by-step guide.
+	assert.equal(guide({ configured: false, source: null }).length, 1, "an unconfigured balance mounts the guide");
+	assert.equal(guide({ configured: true, source: "opencode-db" }).length, 0, "a working balance hides the guide");
+	assert.equal(guide({ configured: false, source: null, reason: "api-key" })[0]?.props.reason, "api-key", "an API-key login names the precise fix");
+	assert.equal(guide({ configured: true, source: "opencode-db", reason: "expired" })[0]?.props.reason, "expired", "an expired sign-in names the fix");
+	// The guide is wired to the page's re-check flow.
+	assert.equal(typeof guide({ configured: false, source: null })[0]?.props.onRecheck, "function");
+	assert.equal(guide({ configured: false, source: null })[0]?.props.credentialRef, "OPENCODE_CONSOLE_TOKEN");
+	assert.equal(guide({ configured: false, source: null })[0]?.props.consoleUrl, "https://opencode.ai/console");
+});
+
+test("the console guide carries the state-specific fix, copy actions and the console link", () => {
+	const exports = loadExports();
+	const t = (key) => key;
+	const render = (props) => {
+		react.reset();
+		return JSON.stringify(exports.ConsoleGuide({ t, consoleUrl: "https://opencode.ai/console", ...props }));
+	};
+	const generic = render({ reason: "", onRecheck: async () => {} });
+	assert.match(generic, /cfg\.console\.guide\.title/);
+	assert.match(generic, /cfg\.console\.hint/, "the generic lead-in for an unconfigured balance");
+	assert.match(generic, /opencode auth login/, "the CLI sign-in command is shown");
+	assert.match(generic, /OPENCODE_CONSOLE_TOKEN/, "the manual credential ref is shown");
+	assert.match(generic, /cfg\.console\.copy\.command/, "the command has a copy button");
+	assert.match(generic, /cfg\.console\.copy\.ref/, "the ref has a copy button");
+	assert.match(generic, /cfg\.console\.recheck/, "the guide offers re-check");
+	assert.match(generic, /https:\/\/opencode\.ai\/console/, "the console website link is rendered");
+
+	// A specific reason replaces the generic hint instead of stacking on it.
+	assert.match(render({ reason: "api-key", onRecheck: async () => {} }), /cfg\.console\.apiKey/);
+	assert.doesNotMatch(render({ reason: "api-key", onRecheck: async () => {} }), /cfg\.console\.hint/);
+	assert.match(render({ reason: "expired", onRecheck: async () => {} }), /cfg\.console\.expired/);
+	assert.doesNotMatch(render({ reason: "expired", onRecheck: async () => {} }), /cfg\.console\.hint/);
+
+	// The referral row and the guide share one CopyButton implementation.
+	react.reset();
+	const inviteRow = exports.InviteLink({ t, url: exports.GLM_INVITE_URL });
+	assert.equal(findType(inviteRow, exports.CopyButton).length, 1, "the referral row reuses CopyButton");
+	// The new guide copy ships in both locales.
+	const locales = [];
+	exports.apply({
+		effect: (fn) => { fn(); return () => {}; },
+		locale: { register: (ns, tables) => { locales.push({ ns, tables }); return () => {}; } },
+		slots: { inject: (_name, callback) => { callback(); }, register: () => () => {} }
+	});
+	for (const key of ["cfg.console.guide.title", "cfg.console.guide.step1", "cfg.console.guide.step2", "cfg.console.guide.step3", "cfg.console.guide.link", "cfg.console.copy.command", "cfg.console.copy.ref", "cfg.console.recheck", "cfg.console.rechecking", "cfg.console.copied", "cfg.console.copyFailed"]) {
+		assert.ok(locales[0].tables.zh[key], `zh ${key} exists`);
+		assert.ok(locales[0].tables.en[key], `en ${key} exists`);
+	}
 });
 
 test("the referral row links out and offers a copy button", () => {
@@ -433,8 +542,196 @@ test("the referral row links out and offers a copy button", () => {
 	assert.match(tree, /"href":"https:\/\/zcode\.z\.ai\/invite\/SMBZKGEF"/);
 	assert.match(tree, /"target":"_blank"/);
 	assert.match(tree, /"rel":"noreferrer"/);
-	assert.match(tree, /cfg\.invite\.copy/, "a copy button is present");
+	assert.equal(findType(row, exports.CopyButton).length, 1, "a copy button is present");
 	assert.doesNotMatch(tree, /方便|积分|首单/, "no marketing copy is rendered");
+});
+
+test("the usage section renders quota windows, balance and a failed provider", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const okProvider = {
+		id: "command-code",
+		name: "Command Code",
+		status: "ok",
+		balance: { amount: 7.44, currency: "USD", source: "command-code-credits", details: { purchased: 7.44, free: 0 } },
+		windows: [
+			{ key: "five-hour", labelKey: "window.five-hour", percent: 12.5, status: "ok", resetsAt: null, windowMs: null },
+			{ key: "monthly", labelKey: "window.monthly", percent: 56, status: "ok", resetsAt: null, windowMs: null }
+		],
+		meta: {}
+	};
+
+	react.reset();
+	const ready = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, provider: okProvider, phase: "ready" }));
+	assert.match(ready, /"key":"five-hour"/, "each quota window gets its own row");
+	assert.match(ready, /12\.5%/);
+	assert.match(ready, /56%/);
+	assert.match(ready, /cfg\.usage\.balance/, "the balance row is labeled");
+	assert.match(ready, /\$7\.44/, "the balance value is money-formatted");
+	assert.match(ready, /balance\.details\.extra/, "the composition is explained");
+	assert.match(ready, /\$0\.00/, "a zero free pool is still named");
+
+	react.reset();
+	const errored = JSON.stringify(exports.UsageSection({
+		t: tt,
+		enabled: true,
+		provider: { id: "glm", name: "GLM Code Plan", status: "error", error: "GLM 500: boom", windows: [], meta: null },
+		phase: "ready"
+	}));
+	assert.match(errored, /cfg\.usage\.error/, "a failed provider renders the error");
+	assert.match(errored, /GLM 500: boom/);
+});
+
+test("the usage section falls back to placeholders, not blanks", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const show = (props) => JSON.stringify(exports.UsageSection({ t: tt, ...props }));
+
+	assert.match(show({ enabled: false, provider: null, phase: "ready" }), /cfg\.usage\.disabled/, "a disabled provider explains itself");
+	assert.match(show({ enabled: true, provider: null, phase: "loading" }), /cfg\.usage\.loading/, "loading shows a placeholder");
+	assert.match(show({ enabled: true, provider: null, phase: "error", error: "HTTP 502" }), /cfg\.usage\.loadFailed/, "a failed snapshot is named");
+	assert.match(show({ enabled: true, provider: null, phase: "error", error: "HTTP 502" }), /HTTP 502/, "the route failure detail is carried");
+	assert.match(show({ enabled: true, provider: null, phase: "idle" }), /cfg\.usage\.loading/, "the initial idle phase reads as loading");
+
+	const noBalance = show({
+		enabled: true,
+		phase: "ready",
+		provider: {
+			id: "opencode-go",
+			name: "OpenCode GO",
+			status: "ok",
+			balance: null,
+			windows: [{ key: "monthly", labelKey: "window.monthly", percent: 10, status: "ok", resetsAt: null, windowMs: null }],
+			meta: { balanceSetup: "api-key", balanceError: "the local OpenCode login is an API key" }
+		}
+	});
+	assert.match(noBalance, /cfg\.usage\.noBalance/, "a setup-blocked balance renders muted instead of blank");
+	assert.doesNotMatch(noBalance, /the local OpenCode login/, "the console hints above carry the precise fix");
+});
+
+test("the settings page renders live usage in every provider card", () => {
+	const exports = loadExports();
+	const value = {
+		opencodeGoEnabled: true,
+		opencodeGoApiKeyEnv: "OPENCODE_GO_API_KEY",
+		commandCodeEnabled: true,
+		commandCodeApiKeyEnv: "COMMANDCODE_API_KEY",
+		glmEnabled: true,
+		glmApiKeyEnv: "ZAI_API_KEY",
+		providerOrder: ["opencode-go", "command-code", "glm"]
+	};
+	const usage = {
+		phase: "ready",
+		at: 0,
+		data: {
+			providers: [
+				{
+					id: "opencode-go",
+					name: "OpenCode GO",
+					status: "ok",
+					balance: { amount: 0.5, currency: "USD", source: "test" },
+					windows: [{ key: "monthly", labelKey: "window.monthly", percent: 56, status: "ok", resetsAt: null, windowMs: null }],
+					meta: {}
+				},
+				{ id: "command-code", name: "Command Code", status: "error", error: "Command Code 500: boom", windows: [], meta: null },
+				{ id: "glm", name: "GLM Code Plan", status: "ok", balance: null, windows: [], meta: { balanceMissing: true } }
+			]
+		},
+		error: null
+	};
+	react.reset();
+	react.seed(0, { phase: "ready", revision: 3, value: value, detection: null, error: null });
+	react.seed(1, value);
+	react.seed(2, { save: false, reload: false });
+	react.seed(3, null);
+	react.seed(4, null);
+	react.seed(5, usage);
+
+	const tree = JSON.stringify(exports.SettingsPage({ t: (key) => key }));
+	assert.equal((tree.match(/"key":"usage"/g) ?? []).length, 3, "each provider card embeds a usage section");
+	assert.match(tree, /"provider":\{"id":"opencode-go"/, "the OpenCode GO card gets its usage slice");
+	assert.match(tree, /"provider":\{"id":"command-code"/, "the Command Code card gets its usage slice");
+	assert.match(tree, /"provider":\{"id":"glm"/, "the GLM card gets its usage slice");
+	assert.match(tree, /"balance":\{"amount":0\.5/, "the balance reaches the section");
+	assert.match(tree, /Command Code 500: boom/, "the failed provider reaches the section");
+	assert.match(tree, /cfg\.usage\.refresh/, "a refresh control is present");
+});
+
+test("a low balance renders amber and a critical balance renders red", () => {
+	const exports = loadExports();
+	const data = {
+		providers: [
+			{ id: "a", name: "Healthy", status: "ok", account: null, plan: null, fallback: null, balance: { amount: 42, currency: "USD", source: "test" }, windows: [], meta: {} },
+			{ id: "b", name: "Low", status: "ok", account: null, plan: null, fallback: null, balance: { amount: 4.88, currency: "USD", source: "test" }, windows: [], meta: {} },
+			{ id: "c", name: "Critical", status: "ok", account: null, plan: null, fallback: null, balance: { amount: 0.5, currency: "CNY", source: "test" }, windows: [], meta: {} }
+		],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: (key) => key });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const healthy = JSON.stringify(providers.props.children[0].props.children[0]);
+	const low = JSON.stringify(providers.props.children[1].props.children[0]);
+	const critical = JSON.stringify(providers.props.children[2].props.children[0]);
+	assert.doesNotMatch(healthy, /dpu-low|dpu-critical/, "a healthy balance keeps the default green");
+	assert.match(low, /dpu-provider-balance dpu-low/, "at or below 5 the chip turns amber");
+	assert.match(critical, /dpu-provider-balance dpu-critical/, "at or below 1 the chip turns red");
+	assert.doesNotMatch(low, /dpu-critical/, "amber does not leak into red");
+});
+
+test("an error line is a keyboard-reachable retry control", () => {
+	const exports = loadExports();
+	const data = {
+		providers: [{
+			id: "glm",
+			name: "GLM Code Plan",
+			status: "error",
+			error: "GLM 500: boom",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [],
+			meta: null
+		}],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 5);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: (key) => key });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const section = providers.props.children[0];
+	const body = section.props.children[1];
+	const errorLine = body.props.children[0];
+	assert.equal(errorLine.props.className, "dpu-provider-error dpu-retry");
+	assert.equal(errorLine.props.role, "button");
+	assert.equal(errorLine.props.tabIndex, 0, "the retry is keyboard reachable");
+	assert.match(errorLine.props.title, /error\.retry/);
+
+	// Enter and Space activate the retry; other keys do not.
+	const stampBefore = react.peek(2);
+	errorLine.props.onKeyDown({ key: "Enter", preventDefault: () => {} });
+	assert.equal(react.peek(2), stampBefore + 1, "Enter forces a refresh");
+	errorLine.props.onKeyDown({ key: "Tab", preventDefault: () => {} });
+	assert.equal(react.peek(2), stampBefore + 1, "Tab does not force a refresh");
+});
+
+test("the settings page reloads usage after saving and can force a refresh", async () => {
+	const text = await readClientText();
+	assert.match(text, /USAGE_PATH \+ \(force \? "\?refresh=1" : ""\)/, "usage reads honor the host's forced-refresh flag");
+	assert.match(text, /void loadUsage\(true\)/, "saving forces one upstream re-read so a changed apikey shows its own numbers");
+	assert.match(text, /void loadUsage\(false\)/, "the page loads the usage snapshot when it mounts");
 });
 
 test("the settings button opens this bundle in the Plugins panel", () => {

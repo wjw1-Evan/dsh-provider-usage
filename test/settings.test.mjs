@@ -2,6 +2,9 @@
 // revision conflicts, write whitelist and cross-origin refusal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	callRoute,
 	installWire,
@@ -20,17 +23,16 @@ const CREDS = {
 
 /** Boot one plugin instance with a fake settings service. */
 function boot({ config = {}, entries = [], credentialMap = CREDS, settings, port = 1234 } = {}) {
-	installWire({});
+	const wire = installWire({});
 	const services = settings === undefined ? {} : { settings };
 	const { ctx, routes, commands } = makeCtx({ entries, services, credentialMap, port });
 	const resolved = config;
 	if (resolved.cacheMs === undefined) resolved.cacheMs = 0;
-	if (resolved.updateCheck === undefined) resolved.updateCheck = false;
 	if (resolved.commandCodeAuthFile === undefined) resolved.commandCodeAuthFile = "/nonexistent/commandcode-auth.json";
 	if (resolved.opencodeConsoleEnabled === undefined) resolved.opencodeConsoleEnabled = false;
 	if (resolved.autoUpdate === undefined) resolved.autoUpdate = false;
 	host.apply(ctx, resolved);
-	return { ctx, routes, commands, config: resolved };
+	return { ctx, routes, commands, config: resolved, wire };
 }
 
 const DEFAULTS = {
@@ -77,6 +79,38 @@ test("GET settings reports the OpenCode console balance source", async () => {
 	assert.equal(consoleInfo.enabled, true);
 	assert.equal(consoleInfo.configured, true);
 	assert.equal(consoleInfo.source, "credential:OPENCODE_CONSOLE_TOKEN");
+});
+
+test("GET settings explains an API-key-only or expired OpenCode console login", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	try {
+		const authFile = join(dir, "auth.json");
+		const dbFile = join(dir, "missing.db");
+		const readConsole = async () => {
+			const settings = makeSettings({ value: DEFAULTS, revision: 1 });
+			const { routes } = boot({
+				settings,
+				config: { opencodeConsoleEnabled: true, opencodeConsoleAuthFile: authFile, opencodeConsoleDbFile: dbFile }
+			});
+			const res = await callRoute(routes, "/provider-usage/settings");
+			return res.body.detection.providers["opencode-go"].console;
+		};
+
+		writeFileSync(authFile, JSON.stringify({ opencode: { type: "key", key: "oc_sk_service_account" } }));
+		const apiKey = await readConsole();
+		assert.equal(apiKey.configured, false);
+		assert.equal(apiKey.reason, "api-key", "the settings page can explain the API-key login");
+
+		writeFileSync(authFile, JSON.stringify({
+			opencode: { type: "oauth", access: "st-expired", expires: Date.now() - 60_000 }
+		}));
+		const expired = await readConsole();
+		assert.equal(expired.configured, true);
+		assert.equal(expired.expired, true);
+		assert.equal(expired.reason, "expired");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("GET settings marks a provider unconfigured when its credential is missing", async () => {
@@ -215,4 +249,38 @@ test("the command is registered and renders all providers", async () => {
 	assert.match(result.text, /Command Code/);
 	assert.match(result.text, /GLM Code Plan/);
 	assert.match(result.text, /充值余额/);
+});
+
+test("saving settings clears the usage cache so a changed apikey is served fresh", async () => {
+	const config = { ...DEFAULTS, cacheMs: 60_000, updateCheck: false, commandCodeAuthFile: "/nonexistent/commandcode-auth.json" };
+	const settings = makeSettings({
+		value: DEFAULTS,
+		revision: 3,
+		onUpdate: (patch, next) => {
+			Object.assign(config, next);
+		}
+	});
+	const { routes, wire } = boot({ settings, config });
+	const upstreamReads = () => wire.requests.filter((request) =>
+		request.url.includes("/v1/usage")
+		|| request.url.includes("api.commandcode.ai")
+		|| request.url.includes("api.z.ai")
+		|| request.url.includes("open.bigmodel.cn")).length;
+
+	await callRoute(routes, "/provider-usage/usage");
+	const first = upstreamReads();
+	assert.ok(first >= 3, "the first read reaches every enabled provider");
+
+	await callRoute(routes, "/provider-usage/usage");
+	assert.equal(upstreamReads(), first, "the TTL serves the immediate follow-up read from cache");
+
+	const saved = await callRoute(routes, "/provider-usage/settings", {
+		method: "POST",
+		headers: { "content-type": "application/json", origin: "http://127.0.0.1:1234" },
+		body: JSON.stringify({ patch: { glmEnabled: true }, expectedRevision: 3 })
+	});
+	assert.equal(saved.status, 200);
+
+	await callRoute(routes, "/provider-usage/usage");
+	assert.ok(upstreamReads() > first, "a save must drop the cache so the next read hits upstream with the saved credentials");
 });

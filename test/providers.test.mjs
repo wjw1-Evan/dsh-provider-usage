@@ -3,12 +3,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	commandCodeFixture,
 	glmFixture,
 	installWire,
+	jsonResponse,
 	loadProviders,
 	usagePayload,
 	usageService
@@ -334,6 +336,224 @@ test("OpenCode console token falls back to the local auth.json", async () => {
 		const call = wire.requests.find((request) => request.url.includes("/console/api/billing/status"));
 		assert.equal(call.headers.get("authorization"), "Bearer sk-console-file");
 		assert.equal(call.headers.get("x-org-id"), "org-file");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+/** Write an OpenCode-shaped credential database for the balance tests. */
+function writeOpencodeDb(path, grants) {
+	const db = new DatabaseSync(path);
+	try {
+		db.exec("CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)");
+		const insert = db.prepare("INSERT INTO credential (id, integration_id, value, active, time_created) VALUES (?, ?, ?, ?, ?)");
+		grants.forEach((entry, index) => {
+			const grant = entry.grant ?? entry;
+			insert.run(`cred-${index}`, "opencode", JSON.stringify(grant), entry.active ?? 1, Date.now() + index);
+		});
+	} finally {
+		db.close();
+	}
+}
+
+/** Provider config for an OpenCode GO balance test. */
+function opencodeGoConfig(consoleConfig) {
+	return {
+		source: "builtin",
+		apiKeyEnv: "OPENCODE_GO_API_KEY",
+		baseUrl: "https://opencode.ai/zen/go",
+		console: { enabled: true, apiKeyEnv: "MISSING_CONSOLE_REF", ...consoleConfig }
+	};
+}
+
+test("a stale legacy auth.json token does not shadow the live database grant", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	const authFile = join(dir, "auth.json");
+	const dbFile = join(dir, "opencode.db");
+	try {
+		writeFileSync(authFile, JSON.stringify({
+			opencode: { type: "oauth", access: "st-stale", metadata: { orgID: "org-stale" } }
+		}));
+		writeOpencodeDb(dbFile, [
+			{ type: "oauth", access: "st-live", metadata: { orgID: "org-live", server: "https://opencode.ai/console" } }
+		]);
+		const wire = installWire({ console: { availableMicroCents: "2500000000" } });
+		const wireFetch = globalThis.fetch;
+		globalThis.fetch = async (input, init) => {
+			const authorization = new Headers(init?.headers).get("authorization");
+			if (String(input).includes("/console/api/billing/status") && authorization === "Bearer st-stale") {
+				return jsonResponse({ _tag: "Unauthorized" }, 401);
+			}
+			return wireFetch(input, init);
+		};
+
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile, baseUrl: "https://opencode.ai" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+
+		assert.equal(result.balance.amount, 25);
+		assert.equal(result.balance.source, "opencode-db", "the live database grant wins over the stale file");
+		const calls = wire.requests.filter((request) => request.url.includes("/console/api/billing/status"));
+		assert.equal(calls.length, 1, "the stale auth.json token is never sent first");
+		assert.equal(calls[0].headers.get("authorization"), "Bearer st-live");
+		assert.equal(calls[0].headers.get("x-org-id"), "org-live");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("a rejected database grant falls back to the next console credential", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	const authFile = join(dir, "auth.json");
+	const dbFile = join(dir, "opencode.db");
+	try {
+		writeFileSync(authFile, JSON.stringify({
+			opencode: { type: "oauth", access: "st-fresh", metadata: { orgID: "org-file" } }
+		}));
+		writeOpencodeDb(dbFile, [
+			{ type: "oauth", access: "st-revoked", metadata: { orgID: "org-db" } }
+		]);
+		installWire({ console: { availableMicroCents: "2500000000" } });
+		const wireFetch = globalThis.fetch;
+		const consoleCalls = [];
+		globalThis.fetch = async (input, init) => {
+			const authorization = new Headers(init?.headers).get("authorization");
+			if (String(input).includes("/console/api/billing/status")) consoleCalls.push(authorization);
+			if (String(input).includes("/console/api/billing/status") && authorization === "Bearer st-revoked") {
+				return jsonResponse({ _tag: "Unauthorized" }, 401);
+			}
+			return wireFetch(input, init);
+		};
+
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile, baseUrl: "https://opencode.ai" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+
+		assert.equal(result.balance.amount, 25);
+		assert.equal(result.balance.source, "opencode-auth-file");
+		assert.deepEqual(consoleCalls, ["Bearer st-revoked", "Bearer st-fresh"], "a 401 retries on the next candidate");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("a revoked (active=0) database grant is never sent to the billing endpoint", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	const authFile = join(dir, "auth.json");
+	const dbFile = join(dir, "opencode.db");
+	try {
+		// A revoked grant plus a live auth.json session: the file grant answers.
+		writeOpencodeDb(dbFile, [
+			{ grant: { type: "oauth", access: "st-revoked", metadata: { orgID: "org-db" } }, active: 0 }
+		]);
+		writeFileSync(authFile, JSON.stringify({
+			opencode: { type: "oauth", access: "st-live", metadata: { orgID: "org-live" } }
+		}));
+		const wire = installWire({ console: { availableMicroCents: "2500000000" } });
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile, baseUrl: "https://opencode.ai" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+		assert.equal(result.balance.amount, 25);
+		assert.equal(result.balance.source, "opencode-auth-file");
+		const calls = wire.requests.filter((request) => request.url.includes("/console/api/billing/status"));
+		assert.equal(calls.length, 1, "the revoked grant is not sent to the console");
+		assert.equal(calls[0].headers.get("authorization"), "Bearer st-live");
+
+		// A revoked grant alone reads as logged out, not as an expired session.
+		rmSync(dbFile);
+		writeOpencodeDb(dbFile, [
+			{ grant: { type: "oauth", access: "st-revoked", metadata: { orgID: "org-db" } }, active: 0 }
+		]);
+		rmSync(authFile);
+		installWire({});
+		const loggedOut = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile, baseUrl: "https://opencode.ai" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+		assert.equal(loggedOut.status, "ok", "the missing balance never hides the quota");
+		assert.equal(loggedOut.meta.balanceSetup, "no-credential", "a revoked-only store reads as logged out");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("an API-key-only OpenCode login is reported as an actionable setup state", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	const authFile = join(dir, "auth.json");
+	try {
+		writeFileSync(authFile, JSON.stringify({
+			opencode: { type: "key", key: "oc_sk_service_account" }
+		}));
+		const wire = installWire({});
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile: join(dir, "missing.db") }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+
+		assert.equal(result.status, "ok", "the missing console balance never hides the quota");
+		assert.equal(result.balance, null);
+		assert.equal(result.meta.balanceSetup, "api-key");
+		assert.match(result.meta.balanceError, /API key/);
+		assert.match(result.meta.balanceError, /opencode auth login/);
+		assert.equal(
+			wire.requests.filter((request) => request.url.includes("/console/api/billing/status")).length,
+			0,
+			"an API key is not sent to the console billing endpoint that rejects it"
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("the console host recorded in the grant is used for the billing request", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	const authFile = join(dir, "auth.json");
+	try {
+		writeFileSync(authFile, JSON.stringify({
+			opencode: {
+				type: "oauth",
+				access: "st-custom",
+				metadata: { orgID: "org-custom", server: "https://console.example.com/console" }
+			}
+		}));
+		const wire = installWire({ console: { availableMicroCents: "100000000" } });
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile, dbFile: join(dir, "missing.db"), baseUrl: "https://opencode.ai" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+
+		assert.equal(result.balance.amount, 1);
+		const call = wire.requests.find((request) => request.url.includes("/console/api/billing/status"));
+		assert.equal(call.url, "https://console.example.com/console/api/billing/status");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("a channel database (opencode-beta.db) is discovered when opencode.db is absent", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "dsh-provider-usage-"));
+	try {
+		writeOpencodeDb(join(dir, "opencode-beta.db"), [
+			{ type: "oauth", access: "st-beta", metadata: { orgID: "org-beta" } }
+		]);
+		installWire({ console: { availableMicroCents: "1230000000" } });
+		const result = await providers.readOpencodeGo({
+			config: opencodeGoConfig({ authFile: join(dir, "missing-auth.json"), dbFile: "" }),
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		});
+
+		assert.equal(result.balance.amount, 12.3);
+		assert.equal(result.balance.source, "opencode-db");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

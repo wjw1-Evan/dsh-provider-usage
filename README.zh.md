@@ -30,7 +30,8 @@
   购买额度 + 免费额度的 “Extra Credits” 余额；两者都显示在账号/套餐旁，并出现在
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
   OpenCode CLI 的 auth.json 或本机 `opencode.db` 自动发现，令牌不会离开宿主进程。
-  没找到控制台令牌时，余额位置显示可点击的「配置余额」，点击直接打开本插件设置页。
+  没找到控制台令牌时，余额位置显示可点击的「配置余额」，点击直接打开本插件设置页；
+  设置页内为分步引导：可复制的登录命令、控制台网页链接与「重新检测」按钮。
   Command Code 的悬停提示会拆成「购买 + 免费」；credits 响应没有这两个池时显示
   灰色「无充值额度」。
 - **自动更新** — 宿主启动后以及按配置的间隔检查 GitHub Release。本地
@@ -42,6 +43,10 @@
 - **余额变化动画** — 组件按正常轮询周期刷新；某个服务商的余额相比上一次轮询
   发生变化时，数字会从旧值滚动到新值，同时一个红色/绿色差值（例如 `-0.1`）
   向上飘走并淡出。没有弹窗，也不依赖对话轮次事件；动画最多可能晚一个轮询周期。
+- **余额低额预警** — 余额 ≤ 5 时余额徽章转黄、≤ 1 转红（货币单位通用），侧边栏
+  和设置页的「实时用量」一致生效，不用点开卡片也能一眼看到余额告急。
+- **失败可一键重试** — 读取失败时，组件里的错误文字本身可点击（也支持键盘
+  Enter/空格），立即强制重新读取。
 - **同源代理** — 浏览器只访问 `/provider-usage/usage` 和
   `/provider-usage/settings`，API Key 始终留在宿主进程。
 - **故障隔离** — 一个服务商失败不会影响另外两个；只要还有服务商成功，路由就返回
@@ -50,8 +55,12 @@
 - **设置快捷入口** — 组件标题栏的「设置」按钮直接打开侧边栏「插件」中的本插件
   页面，并定位到下面的配置页。
 - **插件设置页** — 侧边栏「插件」→ 本插件卡片：启用/禁用服务商、编辑凭据引用和
-  接口地址、选择 GLM 区域，并查看无网络请求的检测状态。保存后立即生效。GLM
-  卡片底部还有一条**推广链接**（Z.ai「邀请好友得积分」），可点击打开或一键复制；
+  接口地址、选择 GLM 区域，并查看无网络请求的检测状态。保存后立即生效。每个服务商
+  卡片内嵌「实时用量」：显示各额度窗口的百分比、剩余重置时间与订阅外充值余额（与
+  侧边栏组件同一份数据）；页面打开期间每 30 秒自动跟随刷新，并显示「更新于 HH:MM」
+  时间戳；「刷新用量」按钮强制读取；保存设置（例如换了 apiKeyEnv 凭据引用）后会以
+  `refresh=1` 立即重新读取，马上反映新凭据的用量与余额。
+  GLM 卡片底部还有一条**推广链接**（Z.ai「邀请好友得积分」），可点击打开或一键复制；
   链接是写死的常量，不经过设置接口，也不会被保存的表单覆盖。
 - **`/provider-usage` 聊天命令** — 在对话中打印所有启用服务商的用量文本。
 - **时间条** — 额度条下方，灰色是窗口已流逝时间，蓝色是剩余时间，几何尺寸与参考
@@ -110,18 +119,38 @@ GO 额度接口不包含账户预付费余额。余额来自
 OAuth 令牌（GO API Key 访问会返回 403）。宿主按以下顺序解析：
 
 1. `opencodeConsoleApiKeyEnv`（默认 `OPENCODE_CONSOLE_TOKEN`），通过 DSH 凭据解析；
-2. `~/.local/share/opencode/auth.json`（设置了 `$XDG_DATA_HOME` 时用
-   `$XDG_DATA_HOME/opencode/auth.json`）中的 `opencode` provider；
-3. `~/.local/share/opencode/opencode.db` 的 `credential` 表（Node 支持
-   `node:sqlite` 时读取；当前 OpenCode 将 OAuth grant 存在这里）。
+2. `~/.local/share/opencode/opencode.db` 的 `credential` 表（Node 支持
+   `node:sqlite` 时读取；当前 OpenCode 将 OAuth grant 存在这里并在运行时轮换）；
+3. `~/.local/share/opencode/auth.json`（设置了 `$XDG_DATA_HOME` 时用
+   `$XDG_DATA_HOME/opencode/auth.json`）中的 `opencode` provider——旧版本的位置。
+
+数据库优先是刻意的：OpenCode 已把登录态迁到数据库，但经常把旧的 `auth.json`
+留在磁盘上，里面的过期令牌会返回 401。宿主会依次尝试每个可用的 OAuth 登录（最多
+四个），所以一份过期数据不会遮住仍然有效的登录。渠道版数据库（`opencode-beta.db`、
+`opencode-dev.db` 等）和 `$OPENCODE_DB` 也会被发现。余额请求使用 grant 里的
+`metadata.server`（自建控制台可用），缺省回落到公开域名；
+`opencodeConsoleBaseUrl` 可覆盖。
+
+OpenCode 的 **API Key** 登录（`oc_sk_…`，service-account 方式）不含控制台会话，
+不会被发到只接受控制台令牌的 billing 接口。API Key 登录、缺少令牌或登录已过期/
+被吊销时，余额位置显示可点击的「配置余额」而不是灰色横杠；点击打开本插件在
+Plugins 面板中的设置页，悬停提示修复方式：运行 `opencode auth login` 并选择
+**OpenCode Console account**，或把控制台令牌保存为 `OPENCODE_CONSOLE_TOKEN`。
+
+余额未配置或控制台登录可修复时，插件设置页的 OpenCode GO 卡片不再给一句静态
+提示，而是渲染分步**引导**：引言按当前状态指明修复方式（未配置 / API Key 登录 /
+登录已过期）。第①步给出 `opencode auth login` 命令与「复制命令」按钮；第②步是
+手动路径——从控制台网页复制令牌、保存为 `OPENCODE_CONSOLE_TOKEN` 凭据——带
+「复制凭据名」按钮和打开 OpenCode 控制台网页的链接（由 `opencodeConsoleBaseUrl`
+推导，以 `/console` 结尾）；第③步提供「重新检测」按钮，重读登录状态并强制刷新
+一次用量，新登录无需重启 DSH 即可显示余额（重新检测不会丢弃表单里未保存的修改）。
+`/provider-usage` 命令对三种可修复状态都会给出同样的文字引导。
 
 可用 `opencodeConsoleAuthFile` 覆盖 auth.json 路径（其目录也用于定位
 `opencode.db`），`opencodeConsoleOrgId` 提供 `x-org-id`，
 `opencodeConsoleEnabled: false` 可关闭余额读取。余额失败不会影响 GO 额度：
-provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`。缺少控制台
-令牌时不再静默隐藏：余额位置显示可点击的「配置余额」，点击打开本插件在
-Plugins 面板中的设置页，悬停提示修复方式（`opencode auth login` 或
-`OPENCODE_CONSOLE_TOKEN`）。其它余额失败显示灰色「余额 —」，悬停给出原因。
+provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`（可由用户修复时
+另带 `meta.balanceSetup`）。其它余额失败显示灰色「余额 —」，悬停给出原因。
 
 ### Command Code 余额
 
@@ -258,10 +287,11 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 
 失败的服务商为 `"status": "error"`，带 `code`、`error` 和空 `windows`，其余服务商
 照常返回。`providers: []` 表示没有启用任何服务商。`meta.balanceError` 表示被容忍
-的余额失败（provider 仍为 `ok`）；`meta.balanceMissing` 表示 Command Code 的
-credits 响应没有购买/免费额度。`meta.errors` 列出 Command Code 的部分接口失败：
-数字照常显示，但健康点变黄，悬停可看到失败的接口。错误卡片仍保留已经解析出的
-套餐信息。
+的余额失败（provider 仍为 `ok`）；`meta.balanceSetup`（`no-credential`、`api-key`
+或 `expired`）表示用户重新登录即可修复的余额状态；`meta.balanceMissing` 表示
+Command Code 的 credits 响应没有购买/免费额度。`meta.errors` 列出 Command Code
+的部分接口失败：数字照常显示，但健康点变黄，悬停可看到失败的接口。错误卡片仍
+保留已经解析出的套餐信息。
 
 ### `GET /provider-usage/settings`
 
@@ -340,7 +370,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、余额变化动画；共 75 个测试。
+auth.json）与失败隔离、会话头注入、余额变化动画；共 98 个测试。
 
 ## 许可证
 

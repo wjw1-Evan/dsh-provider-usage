@@ -227,6 +227,49 @@ test("the chat command reports missing and partial balances instead of omitting 
 	assert.match(partialText, /购买 \$7\.44 \+ 免费 \$0\.00/, "the balance line names purchased and free credits");
 });
 
+test("the chat command guides API-key and expired console logins to re-authenticate", async () => {
+	const command = (booted) => booted.commands.find((candidate) => candidate.name === "provider-usage");
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const nodePath = await import("node:path");
+	const dir = await mkdtemp(nodePath.join(tmpdir(), "dpu-console-"));
+	try {
+		// An API-key-only login (oc_sk_…) carries no console balance; the
+		// command must name the fix instead of a generic failure.
+		const authFile = nodePath.join(dir, "auth.json");
+		await writeFile(authFile, JSON.stringify({ opencode: { type: "api", key: "oc_sk_local" } }));
+		const apiKeyOnly = await bootWith({
+			config: {
+				opencodeConsoleEnabled: true,
+				opencodeConsoleAuthFile: authFile,
+				opencodeConsoleDbFile: nodePath.join(dir, "missing.db")
+			}
+		});
+		const apiKeyText = (await command(apiKeyOnly).handler()).text;
+		assert.match(apiKeyText, /API Key 登录/);
+		assert.match(apiKeyText, /opencode auth login/);
+		assert.match(apiKeyText, /OpenCode Console/);
+
+		// A rejected console session (401/403 from the billing endpoint) is an
+		// expired sign-in; the command names re-authentication.
+		const expiredFile = nodePath.join(dir, "expired.json");
+		await writeFile(expiredFile, JSON.stringify({ opencode: { access: "st_expired", expires: Date.now() - 1000 } }));
+		const expired = await bootWith({
+			wire: { console: null },
+			config: {
+				opencodeConsoleEnabled: true,
+				opencodeConsoleAuthFile: expiredFile,
+				opencodeConsoleDbFile: nodePath.join(dir, "missing.db")
+			}
+		});
+		const expiredText = (await command(expired).handler()).text;
+		assert.match(expiredText, /已过期/);
+		assert.match(expiredText, /opencode auth login/);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test("a Command Code error card keeps the plan it already resolved", async () => {
 	const { routes } = await bootWith({ wire: { commandCodeFail: "/alpha/billing/credits" } });
 	const res = await callRoute(routes, "/provider-usage/usage");

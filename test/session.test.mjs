@@ -71,6 +71,38 @@ test("the fetch wrapper injects the header only for the matching gateway base", 
 	}
 });
 
+test("the fetch wrapper keeps a Request object's own headers", async () => {
+	const requests = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init) => {
+		requests.push({ url: String(input?.url ?? input), headers: new Headers(init?.headers ?? input?.headers) });
+		return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+	};
+	// Re-wrap the fresh fake even if another test already installed the wrapper.
+	delete globalThis[Symbol.for("dsh-multi-provider-usage:fetch-wrapped")];
+	session.patchFetch();
+
+	try {
+		async function* stream() {
+			const request = new Request("https://opencode.ai/zen/go/v1/chat/completions", {
+				method: "POST",
+				headers: { Authorization: "Bearer go-key" }
+			});
+			await fetch(request);
+			yield 1;
+		}
+		for await (const _ of session.withSession(stream(), { sessionId: "session-456", base: "https://opencode.ai/zen/go" })) {
+			// consume
+		}
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].headers.get("authorization"), "Bearer go-key", "the Request's own headers survive the injection");
+		assert.equal(requests[0].headers.get("x-opencode-session"), "session-456");
+	} finally {
+		globalThis.fetch = originalFetch;
+		delete globalThis[Symbol.for("dsh-multi-provider-usage:fetch-wrapped")];
+	}
+});
+
 test("the host registers the llm/stream listener when the fix is enabled", () => {
 	assert.equal(host.Config.dict.injectSessionHeader.meta.default, true);
 });

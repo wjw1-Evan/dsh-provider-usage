@@ -36,7 +36,8 @@ panel settings page — extended from one provider to three.
   console token is auto-discovered from `OPENCODE_CONSOLE_TOKEN`, the OpenCode
   CLI auth file, or its local `opencode.db`; the token never leaves the host.
   When that token is missing, the balance slot becomes a clickable "Set up" chip
-  that opens the plugin settings instead of silently showing nothing. Command
+  that opens the plugin settings, where the OpenCode GO card renders a
+  step-by-step setup guide, instead of silently showing nothing. Command
   Code's tooltip breaks its amount into purchased + free credits; a credits
   response without either pool renders a muted **No top-up** badge.
 - **Auto-update** — on boot and every configured interval the host checks the
@@ -53,6 +54,11 @@ panel settings page — extended from one provider to three.
   the old value to the refreshed one while a red/green delta chip (for example
   `-0.1`) floats up and fades away. There is no popup and no turn-event
   tracking, so the animation may appear up to one poll interval later.
+- **Low-balance tone** — a balance at or below 5 renders amber and at or below 1
+  renders red (thresholds are in the currency unit and apply to USD and CNY
+  plans alike), in both the sidebar and the settings page's live-usage sections.
+- **Click-to-retry failures** — an error line in the widget is itself clickable
+  (and keyboard-activatable) and forces one fresh upstream read.
 - **Same-origin proxy** — the browser only talks to `/provider-usage/usage` and
   `/provider-usage/settings`; API keys stay in the host process.
 - **Failure isolation** — one broken provider never hides the other two. The
@@ -65,6 +71,12 @@ panel settings page — extended from one provider to three.
 - **Bundle settings page** — sidebar **Plugins** panel → this bundle's card:
   enable/disable each provider, edit credential refs and endpoints, choose the
   GLM region, and see non-network detection status. Save applies immediately.
+  Each provider card embeds a **live usage** section — quota windows with
+  percentages, time-to-reset and the top-up balance, from the same canonical
+  snapshot the widget renders. While the page is open it follows the widget:
+  a 30-second poll (when the tab is visible) plus an "Updated HH:MM" stamp,
+  a **Refresh usage** control forces a re-read, and every save re-reads with
+  `refresh=1`, so a changed credential ref shows its own numbers immediately.
   The GLM card also carries the **referral link** (Z.ai "Invite Friends, Get
   Credits") as a clickable, copyable row. The URL is a bundle constant: it never
   goes through the settings route and a settings save cannot overwrite it.
@@ -133,21 +145,48 @@ in this order:
 
 1. `opencodeConsoleApiKeyEnv` (`OPENCODE_CONSOLE_TOKEN` by default), resolved
    through DSH credentials;
-2. `~/.local/share/opencode/auth.json` (`$XDG_DATA_HOME/opencode/auth.json` when
-   set), provider `opencode`;
-3. the `credential` table of `~/.local/share/opencode/opencode.db` (read via
+2. the `credential` table of `~/.local/share/opencode/opencode.db` (read via
    `node:sqlite` when available; this is where current OpenCode releases keep
-   the OAuth grant).
+   the OAuth grant and rotate it);
+3. `~/.local/share/opencode/auth.json` (`$XDG_DATA_HOME/opencode/auth.json` when
+   set), provider `opencode` — the legacy location kept by older releases.
+
+The database is preferred deliberately: OpenCode migrated its grant there but
+often leaves the old `auth.json` behind, and that stale token returns 401. Every
+usable OAuth candidate is tried in turn (at most four), so one expired store
+cannot hide the live one. Channel builds (`opencode-beta.db`, `opencode-dev.db`,
+…) and `$OPENCODE_DB` are discovered too. The billing host comes from the grant's
+`metadata.server` (so a self-hosted console works), falling back to the public
+origin; `opencodeConsoleBaseUrl` overrides it.
+
+An OpenCode **API-key** login (`oc_sk_…`, the service-account method) carries no
+console session and is never sent to the billing endpoint. Such a login, a
+missing token, or an expired/revoked grant renders a clickable **Set up** chip
+(instead of a mute dash) that opens this bundle's page in the Plugins panel and
+names the fix: run `opencode auth login` and choose the **OpenCode Console
+account**, or store a console token as `OPENCODE_CONSOLE_TOKEN`.
+
+When the balance is not configured (or the console login is fixable), the
+OpenCode GO card in the plugin settings renders a step-by-step **setup guide**
+in place of the static hint. The lead-in names the state-specific fix (nothing
+configured, an API-key login, or an expired sign-in). Step ① shows the
+`opencode auth login` CLI command with a **Copy command** button; step ② is the
+manual path — copy the console token and store it as the `OPENCODE_CONSOLE_TOKEN`
+credential — with a **Copy credential ref** button and a link to the OpenCode
+console website (derived from `opencodeConsoleBaseUrl`, ending in `/console`);
+step ③ offers a **Re-check** button that re-reads the sign-in state and forces
+one upstream usage read, so a fresh login shows the balance without restarting
+DSH (unsaved form edits are never discarded by the re-check). The
+`/provider-usage` command gives the same state-specific guidance as text for
+all three fixable states.
 
 The optional `opencodeConsoleAuthFile` overrides the auth file (and its
-directory is used for `opencode.db`), `opencodeConsoleOrgId` supplies the
+directory is used to locate `opencode.db`), `opencodeConsoleOrgId` supplies the
 `x-org-id` header, and `opencodeConsoleEnabled: false` turns the whole balance
 read off. Balance failures never hide the GO quota: the provider stays `ok` with
-`balance: null` and a `meta.balanceError`. A missing console credential is
-actionable rather than hidden: the balance slot renders a clickable **Set up**
-chip that opens this bundle's page in the Plugins panel, whose tooltip names the
-fix (`opencode auth login` or `OPENCODE_CONSOLE_TOKEN`). Any other balance
-failure renders a muted **Balance —** badge whose tooltip carries the error.
+`balance: null` and a `meta.balanceError` (plus `meta.balanceSetup` when the
+user can fix it). Any other balance failure renders a muted **Balance —** badge
+whose tooltip carries the error.
 
 ### Command Code balance
 
@@ -291,10 +330,12 @@ the settings page and the auto-generated form hot-apply.
 Failed providers have `"status": "error"`, `code`, `error` and `windows: []`;
 their siblings are still returned. A body with `providers: []` means no provider
 is enabled. `meta.balanceError` carries a tolerated balance failure (the
-provider still answers `ok`); `meta.balanceMissing` marks a Command Code credits
-response without purchased/free pools. `meta.errors` lists partial Command Code
-endpoint failures: the numbers stay, the health dot turns amber, and the tooltip
-names the failed calls. Error cards keep the plan they already resolved.
+provider still answers `ok`); `meta.balanceSetup` (`no-credential`, `api-key` or
+`expired`) marks a failure the user can fix by signing in again;
+`meta.balanceMissing` marks a Command Code credits response without
+purchased/free pools. `meta.errors` lists partial Command Code endpoint
+failures: the numbers stay, the health dot turns amber, and the tooltip names
+the failed calls. Error cards keep the plan they already resolved.
 
 ### `GET /provider-usage/settings`
 
@@ -380,7 +421,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 75 tests, all offline.
+isolation, and the session-header injection. 98 tests, all offline.
 
 ## License
 
