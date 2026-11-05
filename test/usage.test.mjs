@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
 	callRoute,
+	commandCodeFixture,
 	goEntry,
 	loadHost,
 	usagePayload,
@@ -22,7 +23,7 @@ const CREDS = {
 async function bootWith(overrides = {}) {
 	const wire = (await import("./support/harness.mjs")).installWire(overrides.wire ?? {});
 	const { makeCtx } = await import("./support/harness.mjs");
-	const { ctx, routes } = makeCtx({
+	const { ctx, routes, commands } = makeCtx({
 		entries: overrides.entries ?? [],
 		services: overrides.services ?? {},
 		credentialMap: overrides.credentialMap ?? CREDS,
@@ -37,7 +38,7 @@ async function bootWith(overrides = {}) {
 		...overrides.config
 	};
 	host.apply(ctx, config);
-	return { wire, ctx, routes, config };
+	return { wire, ctx, routes, commands, config };
 }
 
 test("GET usage returns all three providers in display order", async () => {
@@ -190,4 +191,47 @@ test("GET usage includes the OpenCode GO and Command Code top-up balances", asyn
 	assert.equal(go.balance.labelKey, "balance.zen");
 	assert.equal(cc.balance.amount, 7.444241674);
 	assert.equal(cc.balance.labelKey, "balance.extra");
+});
+
+test("the chat command reports missing and partial balances instead of omitting them", async () => {
+	const command = (booted) => booted.commands.find((candidate) => candidate.name === "provider-usage");
+
+	const missing = await bootWith({
+		config: {
+			opencodeConsoleEnabled: true,
+			opencodeConsoleApiKeyEnv: "MISSING_CONSOLE_REF",
+			opencodeConsoleAuthFile: "/nonexistent/auth.json",
+			opencodeConsoleDbFile: "/nonexistent/opencode.db"
+		}
+	});
+	const missingText = (await command(missing).handler()).text;
+	assert.match(missingText, /未配置/);
+	assert.match(missingText, /opencode auth login/);
+
+	const fixture = commandCodeFixture();
+	const noTopUp = await bootWith({
+		wire: {
+			commandCode: {
+				...fixture,
+				credits: { credits: { monthlyCredits: 34.9 }, windowLimits: fixture.credits.windowLimits }
+			}
+		}
+	});
+	const noTopUpText = (await command(noTopUp).handler()).text;
+	assert.match(noTopUpText, /无充值额度/);
+
+	const partial = await bootWith({ wire: { commandCodeFail: "/alpha/whoami" } });
+	const partialText = (await command(partial).handler()).text;
+	assert.match(partialText, /部分接口失败/);
+	assert.match(partialText, /whoami/);
+	assert.match(partialText, /购买 \$7\.44 \+ 免费 \$0\.00/, "the balance line names purchased and free credits");
+});
+
+test("a Command Code error card keeps the plan it already resolved", async () => {
+	const { routes } = await bootWith({ wire: { commandCodeFail: "/alpha/billing/credits" } });
+	const res = await callRoute(routes, "/provider-usage/usage");
+	const cc = res.body.providers.find((provider) => provider.id === "command-code");
+	assert.equal(cc.status, "error");
+	assert.equal(cc.plan.name, "GOAT", "the known plan is not thrown away with the failure");
+	assert.match(cc.error, /alpha\/billing\/credits 500/, "the error names the failing call");
 });

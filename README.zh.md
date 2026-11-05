@@ -30,6 +30,9 @@
   购买额度 + 免费额度的 “Extra Credits” 余额；两者都显示在账号/套餐旁，并出现在
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
   OpenCode CLI 的 auth.json 或本机 `opencode.db` 自动发现，令牌不会离开宿主进程。
+  没找到控制台令牌时，余额位置显示可点击的「配置余额」，点击直接打开本插件设置页。
+  Command Code 的悬停提示会拆成「购买 + 免费」；credits 响应没有这两个池时显示
+  灰色「无充值额度」。
 - **自动更新** — 宿主启动后以及按配置的间隔检查 GitHub Release。只有满足
   「在 main 分支、工作区干净、可严格 fast-forward」的本地 `link:` checkout 才会
   自动 `git pull`；运行中的宿主仍持有旧模块，所以组件/设置页显示“已更新，重启
@@ -41,7 +44,8 @@
 - **同源代理** — 浏览器只访问 `/provider-usage/usage` 和
   `/provider-usage/settings`，API Key 始终留在宿主进程。
 - **故障隔离** — 一个服务商失败不会影响另外两个；只要还有服务商成功，路由就返回
-  `200`，全部失败才返回 `502`。
+  `200`，全部失败才返回 `502`。部分接口失败时数字照常显示，但健康点变黄，悬停
+  列出失败的那几个接口。
 - **设置快捷入口** — 组件标题栏的「设置」按钮直接打开侧边栏「插件」中的本插件
   页面，并定位到下面的配置页。
 - **插件设置页** — 侧边栏「插件」→ 本插件卡片：启用/禁用服务商、编辑凭据引用和
@@ -107,8 +111,25 @@ OAuth 令牌（GO API Key 访问会返回 403）。宿主按以下顺序解析�
 可用 `opencodeConsoleAuthFile` 覆盖 auth.json 路径（其目录也用于定位
 `opencode.db`），`opencodeConsoleOrgId` 提供 `x-org-id`，
 `opencodeConsoleEnabled: false` 可关闭余额读取。余额失败不会影响 GO 额度：
-provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`；组件会隐藏
-“未配置可选令牌”的情况，而不是显示假错误。
+provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`。缺少控制台
+令牌时不再静默隐藏：余额位置显示可点击的「配置余额」，点击打开本插件在
+Plugins 面板中的设置页，悬停提示修复方式（`opencode auth login` 或
+`OPENCODE_CONSOLE_TOKEN`）。其它余额失败显示灰色「余额 —」，悬停给出原因。
+
+### Command Code 余额
+
+Command Code 的额度与余额共用同一个 API Key 和同一组 billing 接口，不会像
+OpenCode 那样分叉：缺少 `COMMANDCODE_API_KEY` 且没有 `~/.commandcode/auth.json`
+时整个服务商报错并显示 `no API key`，不会只丢余额。另有两个较窄的缺口，现在会
+显式报告而不是留白：
+
+- `/alpha/billing/credits` 失败时，由于所有窗口都来自这个请求，服务商本身也会
+  进入错误状态；错误消息现在会带上底层接口和状态码，而不是只显示
+  “no usable quota windows”，同时 `meta.balanceError` 让标题栏显示灰色
+  「余额 —」并携带原因；
+- credits 请求成功但没有 `purchasedCredits` / `freeCredits` 时，`balance` 保持
+  `null` 并带 `meta.balanceMissing: true`，标题栏显示灰色「无充值额度」（接口
+  真的返回 0 时仍显示 `$0.00`）。
 
 ### OpenCode GO 集成与回退
 
@@ -229,7 +250,11 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 ```
 
 失败的服务商为 `"status": "error"`，带 `code`、`error` 和空 `windows`，其余服务商
-照常返回。`providers: []` 表示没有启用任何服务商。
+照常返回。`providers: []` 表示没有启用任何服务商。`meta.balanceError` 表示被容忍
+的余额失败（provider 仍为 `ok`）；`meta.balanceMissing` 表示 Command Code 的
+credits 响应没有购买/免费额度。`meta.errors` 列出 Command Code 的部分接口失败：
+数字照常显示，但健康点变黄，悬停可看到失败的接口。错误卡片仍保留已经解析出的
+套餐信息。
 
 ### `GET /provider-usage/settings`
 
@@ -308,7 +333,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、余额变化动画；共 65 个测试。
+auth.json）与失败隔离、会话头注入、余额变化动画；共 75 个测试。
 
 ## 许可证
 

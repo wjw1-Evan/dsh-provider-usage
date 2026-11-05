@@ -113,6 +113,42 @@ test("readCommandCode fails loudly without a credential or auth file", async () 
 	);
 });
 
+test("a Command Code credits failure names the cause instead of a generic empty response", async () => {
+	installWire({ commandCodeFail: "/alpha/billing/credits" });
+	await assert.rejects(
+		providers.readCommandCode({
+			config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+			resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+		}),
+		(error) => {
+			assert.equal(error.code, "invalid-response");
+			assert.match(error.message, /no usable quota windows/);
+			assert.match(error.message, /alpha\/billing\/credits 500/, "the underlying 500 is part of the message");
+			assert.match(error.meta.balanceError, /^Command Code balance: .*credits/, "the header badge can explain the missing balance");
+			return true;
+		}
+	);
+});
+
+test("a Command Code credits response without top-up pools reports no balance", async () => {
+	const fixture = commandCodeFixture();
+	installWire({
+		commandCode: {
+			...fixture,
+			credits: { credits: { monthlyCredits: 34.9 }, windowLimits: fixture.credits.windowLimits }
+		}
+	});
+	const result = await providers.readCommandCode({
+		config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+		resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+	});
+	assert.equal(result.status, "ok");
+	assert.ok(result.windows.length > 0, "the quota windows still render");
+	assert.equal(result.balance, null);
+	assert.equal(result.meta.balanceMissing, true);
+	assert.equal(result.meta.balanceError, undefined);
+});
+
 test("readGlm falls back from z.ai to bigmodel in auto mode and sends the raw token", async () => {
 	const wire = installWire({ glm: { zai: { success: false, msg: "当前用户不存在coding plan" }, bigmodel: glmFixture() } });
 	const result = await providers.readGlm({

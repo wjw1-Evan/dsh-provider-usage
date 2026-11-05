@@ -35,6 +35,10 @@ panel settings page — extended from one provider to three.
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
   console token is auto-discovered from `OPENCODE_CONSOLE_TOKEN`, the OpenCode
   CLI auth file, or its local `opencode.db`; the token never leaves the host.
+  When that token is missing, the balance slot becomes a clickable "Set up" chip
+  that opens the plugin settings instead of silently showing nothing. Command
+  Code's tooltip breaks its amount into purchased + free credits; a credits
+  response without either pool renders a muted **No top-up** badge.
 - **Auto-update** — on boot and every configured interval the host checks the
   GitHub release feed. A local `link:` checkout is fast-forwarded only when it
   is on `main`, clean, and a strict fast-forward; the running Host keeps the old
@@ -51,7 +55,8 @@ panel settings page — extended from one provider to three.
   `/provider-usage/settings`; API keys stay in the host process.
 - **Failure isolation** — one broken provider never hides the other two. The
   route answers `200` while any provider succeeds and `502` only when all
-  enabled providers fail.
+  enabled providers fail. Partial endpoint failures keep the provider's numbers
+  but turn its health dot amber and name the failed calls in the tooltip.
 - **Settings shortcut** — the widget header's **Settings** button opens this
   bundle's page in the sidebar **Plugins** panel, directly on the configuration
   page below.
@@ -130,8 +135,27 @@ The optional `opencodeConsoleAuthFile` overrides the auth file (and its
 directory is used for `opencode.db`), `opencodeConsoleOrgId` supplies the
 `x-org-id` header, and `opencodeConsoleEnabled: false` turns the whole balance
 read off. Balance failures never hide the GO quota: the provider stays `ok` with
-`balance: null` and a `meta.balanceError`, and the widget hides the missing
-optional credential instead of showing a false error.
+`balance: null` and a `meta.balanceError`. A missing console credential is
+actionable rather than hidden: the balance slot renders a clickable **Set up**
+chip that opens this bundle's page in the Plugins panel, whose tooltip names the
+fix (`opencode auth login` or `OPENCODE_CONSOLE_TOKEN`). Any other balance
+failure renders a muted **Balance —** badge whose tooltip carries the error.
+
+### Command Code balance
+
+Command Code's quota and balance share one API key and one billing family, so
+they cannot diverge the way OpenCode's do: a missing key (`COMMANDCODE_API_KEY`
+or `~/.commandcode/auth.json`) fails the whole provider with an explicit
+`no API key` message rather than blanking only the balance. Two narrower gaps
+are reported instead of hidden:
+
+- when `/alpha/billing/credits` fails, that request carries every window, so the
+  provider errors as well; its message now includes the underlying interface and
+  status instead of only "no usable quota windows", and `meta.balanceError` lets
+  the header show a muted **Balance —** badge carrying the cause;
+- when the credits response succeeds but carries neither `purchasedCredits` nor
+  `freeCredits`, `balance` stays `null` with `meta.balanceMissing: true` and the
+  header shows a muted **No top-up** badge (a real `0` still renders `$0.00`).
 
 ### OpenCode GO integration and fallback
 
@@ -258,7 +282,11 @@ the settings page and the auto-generated form hot-apply.
 
 Failed providers have `"status": "error"`, `code`, `error` and `windows: []`;
 their siblings are still returned. A body with `providers: []` means no provider
-is enabled.
+is enabled. `meta.balanceError` carries a tolerated balance failure (the
+provider still answers `ok`); `meta.balanceMissing` marks a Command Code credits
+response without purchased/free pools. `meta.errors` lists partial Command Code
+endpoint failures: the numbers stay, the health dot turns amber, and the tooltip
+names the failed calls. Error cards keep the plan they already resolved.
 
 ### `GET /provider-usage/settings`
 
@@ -344,7 +372,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 65 tests, all offline.
+isolation, and the session-header injection. 75 tests, all offline.
 
 ## License
 
