@@ -4,6 +4,7 @@
 // that spawn (EPERM). Importing the files in one process registers every
 // `node:test` case and runs them without spawning.
 import "./config.test.mjs";
+import "./auto-update.test.mjs";
 import "./providers.test.mjs";
 import "./usage.test.mjs";
 import "./settings.test.mjs";
