@@ -43,9 +43,9 @@ panel settings page — extended from one provider to three.
   available version and points at the plugin market. The plugin never restarts
   DSH by itself.
 - **Balance-change animation** — the widget polls on its normal interval; when
-  a provider's balance differs from the previous poll, its balance badge
-  briefly animates to the delta (red for a decrease, green for an increase),
-  then shows the refreshed balance. There is no popup and no turn-event
+  a provider's balance differs from the previous poll, the number counts from
+  the old value to the refreshed one while a red/green delta chip (for example
+  `-0.1`) floats up and fades away. There is no popup and no turn-event
   tracking, so the animation may appear up to one poll interval later.
 - **Same-origin proxy** — the browser only talks to `/provider-usage/usage` and
   `/provider-usage/settings`; API keys stay in the host process.

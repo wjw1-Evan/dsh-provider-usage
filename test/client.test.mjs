@@ -182,8 +182,9 @@ test("all providers render in one column and each header collapses independently
 	assert.equal(head.props.className, "dpu-provider-head");
 	assert.equal(head.props["aria-expanded"], true);
 	assert.match(JSON.stringify(head), /dpu-badge/, "the fallback badge belongs in the header");
-	assert.match(JSON.stringify(head), /dpu-provider-balance dpu-down/, "the balance delta is red");
-	assert.match(JSON.stringify(head), /-\$0\.26/, "the balance badge shows the turn delta");
+	assert.match(JSON.stringify(head), /dpu-provider-balance dpu-hit/, "the balance value pulses");
+	assert.match(JSON.stringify(head), /dpu-balance-float dpu-down-text/, "the delta flies away in red");
+	assert.match(JSON.stringify(head), /-0\.26/, "the flying delta is compact");
 	assert.doesNotMatch(JSON.stringify(firstSection.props.children[1]), /dpu-sub/, "metadata must not wrap to a second line");
 	assert.ok(firstSection.props.children[1] !== null, "expanded by default");
 
@@ -208,6 +209,9 @@ test("balance deltas compare only providers with a changed balance", () => {
 	assert.equal(exports.formatSignedMoney(change), "-$0.26");
 	assert.equal(exports.formatSignedMoney({ amount: 1.5, currency: "USD" }), "+$1.50");
 	assert.equal(exports.formatSignedMoney({ amount: 0, currency: "USD" }), "$0.00");
+	assert.equal(exports.formatDeltaShort({ amount: -0.1, currency: "USD" }), "-0.1");
+	assert.equal(exports.formatDeltaShort({ amount: -0.26, currency: "USD" }), "-0.26");
+	assert.equal(exports.formatDeltaShort({ amount: 1.5, currency: "USD" }), "+1.5");
 	assert.deepEqual(exports.balanceDeltasBetween(null, current), {});
 	assert.deepEqual(exports.balanceDeltasBetween(previous, [{ id: "glm", status: "error" }]), {});
 });
