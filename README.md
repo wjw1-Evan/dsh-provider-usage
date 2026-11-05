@@ -54,6 +54,9 @@ panel settings page — extended from one provider to three.
 - **Failure isolation** — one broken provider never hides the other two. The
   route answers `200` while any provider succeeds and `502` only when all
   enabled providers fail.
+- **Settings shortcut** — the widget header's **Settings** button opens this
+  bundle's page in the sidebar **Plugins** panel, directly on the configuration
+  page below.
 - **Bundle settings page** — sidebar **Plugins** panel → this bundle's card:
   enable/disable each provider, edit credential refs and endpoints, choose the
   GLM region, and see non-network detection status. Save applies immediately.
@@ -342,7 +345,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 67 tests, all offline.
+isolation, and the session-header injection. 68 tests, all offline.
 
 ## License
 

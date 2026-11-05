@@ -218,6 +218,36 @@ test("turn events collect only quota-provider usage and fire on turn end", () =>
 	assert.equal(state.show, null, "empty turns do not pop up");
 });
 
+test("the settings button opens this bundle in the Plugins panel", () => {
+	const exports = loadExports();
+	const opened = [];
+	const ctx = {
+		effect: (fn) => { fn(); return () => {}; },
+		locale: { register: () => () => {} },
+		slots: {
+			inject: (_name, callback) => { callback(); },
+			register: () => () => {}
+		},
+		get: (name) => name === "pluginNavigation"
+			? { openBundle: (packageName) => opened.push(packageName) }
+			: undefined
+	};
+	exports.apply(ctx);
+	react.reset();
+	react.seed(0, { providers: [], defaultProvider: "auto" });
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	const widget = exports.Widget({ wide: true, t: (key) => key });
+	const head = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-head");
+	const right = head.props.children[1];
+	const classes = right.props.children.map((child) => child && child.props && child.props.className);
+	assert.ok(classes.indexOf("dpu-settings") > classes.indexOf("dpu-refresh"), "settings sits right of refresh");
+	const button = right.props.children.find((child) => child && child.props && child.props.className === "dpu-settings");
+	button.props.onClick();
+	assert.deepEqual(opened, [pkg.name]);
+});
+
 test("provider routes map to the three quota providers", () => {
 	const exports = loadExports();
 	assert.equal(exports.usageProviderFor("opencode-go"), "opencode-go");
