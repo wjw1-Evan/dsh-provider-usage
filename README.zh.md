@@ -35,10 +35,9 @@
   自动 `git pull`；运行中的宿主仍持有旧模块，所以组件/设置页显示“已更新，重启
   DSH”。npm/市场安装的副本不会被插件自行改写，只提示新版本并指向插件市场。
   插件不会自行重启 DSH。
-- **余额变化动画** — 对话轮次结束时，如果本轮使用了 OpenCode GO、Command Code
-  或 GLM Code Plan，组件里该服务商的余额徽标会短暂变为本轮变化值：减少为红色，
-  增加为绿色，随后恢复为刷新后的余额。不再弹出浮层。只使用其他服务商时不会
-  触发。
+- **余额变化动画** — 组件按正常轮询周期刷新；某个服务商的余额相比上一次轮询
+  发生变化时，余额徽标会短暂变为变化值：减少为红色，增加为绿色，随后恢复为
+  刷新后的余额。没有弹窗，也不依赖对话轮次事件；动画最多可能晚一个轮询周期。
 - **同源代理** — 浏览器只访问 `/provider-usage/usage` 和
   `/provider-usage/settings`，API Key 始终留在宿主进程。
 - **故障隔离** — 一个服务商失败不会影响另外两个；只要还有服务商成功，路由就返回
@@ -294,8 +293,6 @@ base 开头时才添加 `x-opencode-session`。base 来自
 - Node.js ≥ 18（全局 `fetch`、`AbortSignal.timeout`）。
 - `dsh-opencode-go` 可选；未安装属于正常回退。
 - 设置 `COMMANDCODE_API_KEY` 时，Command Code CLI 登录文件可选。
-- 余额动画依赖一个不可见的 `shell.overlay` 追踪器和 `sessions` / `uiSession`
-  客户端服务；宿主没有这些能力时只会失去动画。
 - 宿主不提供 `plugins.bundle.config` 时只会失去设置页；侧边栏组件和
   `/provider-usage` 命令仍可用。此时可在 profile patch 或自动生成表单中改配置。
 
@@ -309,7 +306,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、余额变化动画；共 68 个测试。
+auth.json）与失败隔离、会话头注入、余额变化动画；共 65 个测试。
 
 ## 许可证
 

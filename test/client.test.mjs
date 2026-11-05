@@ -162,12 +162,12 @@ test("all providers render in one column and each header collapses independently
 	data.providers[0].fallback = { from: "opencode-go", reason: "not-installed", message: "fixture" };
 	data.providers[1].account = { name: "Evan", ref: "REF", id: null };
 	data.providers[1].plan = { id: "individual-goat", name: "GOAT", status: "active" };
-	exports.publishTurnBalance("opencode-go", { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 });
 	react.reset();
 	react.seed(0, data);
 	react.seed(1, null);
 	react.seed(2, 0);
 	react.seed(3, new Set());
+	react.seed(4, { "opencode-go": { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 } });
 
 	const first = exports.Widget({ wide: true, t: (key) => key });
 	const providers = first.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
@@ -195,37 +195,19 @@ test("all providers render in one column and each header collapses independently
 	assert.match(JSON.stringify(ccHead), /dpu-account/);
 	assert.match(JSON.stringify(ccHead), /dpu-plan/);
 	assert.match(JSON.stringify(ccHead), /GOAT/);
-	exports.clearTurnBalances();
 });
 
-test("balance deltas are computed from the turn-start snapshot", () => {
+test("balance deltas compare only providers with a changed balance", () => {
 	const exports = loadExports();
-	const baseline = { "opencode-go": { amount: 5.14, currency: "USD" } };
-	const current = { id: "opencode-go", balance: { amount: 4.88, currency: "USD" } };
-	const change = exports.balanceChangeFor(baseline, current);
+	const previous = { "opencode-go": { amount: 5.14, currency: "USD" } };
+	const current = [{ id: "opencode-go", balance: { amount: 4.88, currency: "USD" } }];
+	const change = exports.balanceDeltasBetween(previous, current)["opencode-go"];
 	assert.deepEqual(change, { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 });
 	assert.equal(exports.formatSignedMoney(change), "-$0.26");
 	assert.equal(exports.formatSignedMoney({ amount: 1.5, currency: "USD" }), "+$1.50");
 	assert.equal(exports.formatSignedMoney({ amount: 0, currency: "USD" }), "$0.00");
-	assert.equal(exports.balanceChangeFor(null, current), null);
-	assert.equal(exports.balanceChangeFor(baseline, { id: "glm", status: "error" }), null);
-});
-
-test("turn events collect only quota-provider usage and fire on turn end", () => {
-	const exports = loadExports();
-	let state = { used: new Set(), show: null };
-	const apply = (event) => { state = exports.turnUsageStep(state.used, event); };
-	apply({ type: "turn/start" });
-	apply({ type: "assistant/message", data: { message: { source: { provider: "deepseek-official" } } } });
-	assert.deepEqual(state.show, null);
-	apply({ type: "assistant/message", data: { message: { source: { provider: "opencode-go" } } } });
-	apply({ type: "assistant/message", data: { message: { source: { provider: "zai-coding-cn" } } } });
-	apply({ type: "turn/end" });
-	assert.deepEqual(state.show, ["opencode-go", "glm"]);
-	assert.equal(state.used.size, 0);
-	apply({ type: "turn/start" });
-	apply({ type: "turn/end" });
-	assert.equal(state.show, null, "empty turns do not pop up");
+	assert.deepEqual(exports.balanceDeltasBetween(null, current), {});
+	assert.deepEqual(exports.balanceDeltasBetween(previous, [{ id: "glm", status: "error" }]), {});
 });
 
 test("the settings button opens this bundle in the Plugins panel", () => {
@@ -248,6 +230,7 @@ test("the settings button opens this bundle in the Plugins panel", () => {
 	react.seed(1, null);
 	react.seed(2, 0);
 	react.seed(3, new Set());
+	react.seed(4, { "opencode-go": { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 } });
 	const widget = exports.Widget({ wide: true, t: (key) => key });
 	const head = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-head");
 	const right = head.props.children[1];
@@ -256,47 +239,6 @@ test("the settings button opens this bundle in the Plugins panel", () => {
 	const button = right.props.children.find((child) => child && child.props && child.props.className === "dpu-settings");
 	button.props.onClick();
 	assert.deepEqual(opened, [pkg.name]);
-});
-
-test("provider routes map to the three quota providers", () => {
-	const exports = loadExports();
-	assert.equal(exports.usageProviderFor("opencode-go"), "opencode-go");
-	assert.equal(exports.usageProviderFor("opencode"), "opencode-go");
-	assert.equal(exports.usageProviderFor("zai-coding-cn"), "glm");
-	assert.equal(exports.usageProviderFor("z-ai"), "glm");
-	assert.equal(exports.usageProviderFor("command-code"), "command-code");
-	assert.equal(exports.usageProviderFor("commandcode"), "command-code");
-	assert.equal(exports.usageProviderFor("deepseek-official"), null);
-	assert.equal(exports.usageProviderFor(""), null);
-});
-
-test("the turn-balance tracker registers in the shell overlay without a popup", () => {
-	const exports = loadExports();
-	const registrations = [];
-	const ctx = {
-		effect: (fn) => { fn(); return () => {}; },
-		locale: { register: () => () => {} },
-		slots: {
-			inject: (_name, callback) => { callback(); },
-			register: (options, component) => {
-				registrations.push({ options, component });
-				return () => {};
-			}
-		},
-		get: (name) => name === "sessions"
-			? { binding: () => null }
-			: name === "uiSession"
-				? { current: { getSnapshot: () => ({ key: undefined }), subscribe: () => () => {} } }
-				: undefined
-	};
-	exports.apply(ctx);
-	const tracker = registrations.find((entry) => entry.options.name === "shell.overlay");
-	assert.ok(tracker !== undefined, "shell.overlay registered");
-	assert.equal(tracker.options.id, pkg.name + ":turn-balance");
-
-	react.reset();
-	const Component = exports.createTurnBalanceTracker({ sessions: {}, uiSession: {} });
-	assert.equal(Component({}), null, "the tracker renders no popup");
 });
 
 test("top-level bundle code does not collide with another plugin's globals", () => {
