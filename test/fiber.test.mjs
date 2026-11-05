@@ -14,7 +14,7 @@ function boot() {
 		credentialMap: CREDS,
 		port: 1234
 	});
-	const config = { cacheMs: 0, updateCheck: false, commandCodeAuthFile: "/nonexistent/auth.json" };
+	const config = { cacheMs: 0, updateCheck: false, autoUpdate: false, commandCodeAuthFile: "/nonexistent/auth.json" };
 	host.apply(ctx, config);
 	return { ctx, routes, commands, listeners, effects, warns, exact, disposeAll, config };
 }
@@ -24,7 +24,7 @@ test("routes and commands are disposed with their fiber", () => {
 	assert.deepEqual(first.routes.map((route) => route.path).sort(), ["/provider-usage/settings", "/provider-usage/usage"]);
 	assert.equal(first.commands.length, 1);
 	assert.equal(first.listeners.length, 1);
-	assert.equal(first.effects.length, 3);
+	assert.equal(first.effects.length, 4);
 
 	first.disposeAll();
 	assert.equal(first.routes.length, 0);
@@ -46,7 +46,7 @@ test("a stale route leaked by an older build is repaired before registration", (
 	// Simulate a route row left behind outside the fiber: registration did not
 	// go through `webServer.register`, so no disposer owns it.
 	exact.set("/provider-usage/usage", { kind: "exact", path: "/provider-usage/usage", handler: () => {} });
-	assert.doesNotThrow(() => host.apply(ctx, { cacheMs: 0, updateCheck: false, commandCodeAuthFile: "/nonexistent/auth.json" }));
+	assert.doesNotThrow(() => host.apply(ctx, { cacheMs: 0, updateCheck: false, autoUpdate: false, commandCodeAuthFile: "/nonexistent/auth.json" }));
 	assert.equal(routes.length, 2);
 	assert.notEqual(exact.get("/provider-usage/usage").handler, undefined);
 });
@@ -55,7 +55,7 @@ test("a command leaked by an older instance only warns", () => {
 	installWire({});
 	const { ctx, routes, warns } = makeCtx({ credentialMap: CREDS, port: 1234 });
 	ctx.commands.register({ name: "provider-usage", description: "leaked", handler: async () => ({ kind: "success", text: "" }) });
-	assert.doesNotThrow(() => host.apply(ctx, { cacheMs: 0, updateCheck: false, commandCodeAuthFile: "/nonexistent/auth.json" }));
+	assert.doesNotThrow(() => host.apply(ctx, { cacheMs: 0, updateCheck: false, autoUpdate: false, commandCodeAuthFile: "/nonexistent/auth.json" }));
 	assert.equal(routes.length, 2, "the widget routes still register");
 	assert.ok(warns.some((message) => /still owned/.test(message)), warns.join("\n"));
 });

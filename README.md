@@ -35,6 +35,13 @@ panel settings page — extended from one provider to three.
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
   console token is auto-discovered from `OPENCODE_CONSOLE_TOKEN`, the OpenCode
   CLI auth file, or its local `opencode.db`; the token never leaves the host.
+- **Auto-update** — on boot and every configured interval the host checks the
+  GitHub release feed. A local `link:` checkout is fast-forwarded only when it
+  is on `main`, clean, and a strict fast-forward; the running Host keeps the old
+  module graph, so the widget/settings show "updated — restart DSH". An
+  npm/market-installed copy is never modified by the plugin: it reports the
+  available version and points at the plugin market. The plugin never restarts
+  DSH by itself.
 - **Turn usage card** — when a turn finishes and the conversation used OpenCode
   GO, Command Code or GLM Code Plan, a floating card in the top-right shows that
   provider's latest quota windows, balance and balance change for the turn
@@ -185,6 +192,8 @@ the settings page and the auto-generated form hot-apply.
 | `glmRegion` | `"auto"` | `auto`, `zai`, `bigmodel`, `custom` |
 | `cacheMs` | `30000` | Per-provider host cache TTL |
 | `updateCheck` | `true` | npm update check (24 h) |
+| `autoUpdate` | `true` | Check GitHub releases; fast-forward a clean local checkout |
+| `autoUpdateCheckHours` | `6` | Hours between auto-update checks (1–168) |
 | `injectSessionHeader` | `true` | OpenCode GO session-header fix |
 | `defaultProvider` | `"auto"` | Provider pinned first in the column (`auto`, `opencode-go`, `command-code`, `glm`) |
 
@@ -333,7 +342,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 60 tests, all offline.
+isolation, and the session-header injection. 67 tests, all offline.
 
 ## License
 

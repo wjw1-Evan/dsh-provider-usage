@@ -30,6 +30,8 @@ test("the exported Config schema carries every provider knob", () => {
 		"glmRegion",
 		"cacheMs",
 		"updateCheck",
+		"autoUpdate",
+		"autoUpdateCheckHours",
 		"injectSessionHeader",
 		"defaultProvider"
 	]) {

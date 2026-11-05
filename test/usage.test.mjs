@@ -31,6 +31,7 @@ async function bootWith(overrides = {}) {
 	const config = {
 		cacheMs: 0,
 		updateCheck: false,
+		autoUpdate: false,
 		opencodeConsoleEnabled: false,
 		commandCodeAuthFile: "/nonexistent/commandcode-auth.json",
 		...overrides.config

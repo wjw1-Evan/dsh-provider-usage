@@ -30,6 +30,11 @@
   购买额度 + 免费额度的 “Extra Credits” 余额；两者都显示在账号/套餐旁，并出现在
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
   OpenCode CLI 的 auth.json 或本机 `opencode.db` 自动发现，令牌不会离开宿主进程。
+- **自动更新** — 宿主启动后以及按配置的间隔检查 GitHub Release。只有满足
+  「在 main 分支、工作区干净、可严格 fast-forward」的本地 `link:` checkout 才会
+  自动 `git pull`；运行中的宿主仍持有旧模块，所以组件/设置页显示“已更新，重启
+  DSH”。npm/市场安装的副本不会被插件自行改写，只提示新版本并指向插件市场。
+  插件不会自行重启 DSH。
 - **每轮用量浮层** — 对话轮次结束时，如果本轮使用了 OpenCode GO、Command Code
   或 GLM Code Plan，右上角会浮出该服务商最新的套餐窗口、充值余额，以及本轮
   余额变化（轮次开始快照 vs 刷新后的余额）；只使用其他服务商时不会弹出。浮层
@@ -160,6 +165,8 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `glmRegion` | `"auto"` | `auto`、`zai`、`bigmodel`、`custom` |
 | `cacheMs` | `30000` | 单个服务商的宿主缓存 TTL |
 | `updateCheck` | `true` | npm 新版本检查（24 小时） |
+| `autoUpdate` | `true` | 检查 GitHub Release；干净本地 checkout 自动 fast-forward |
+| `autoUpdateCheckHours` | `6` | 自动更新检查间隔（1–168 小时） |
 | `injectSessionHeader` | `true` | OpenCode GO 会话头修复 |
 | `defaultProvider` | `"auto"` | 置顶显示的服务商（`auto`、`opencode-go`、`command-code`、`glm`） |
 
@@ -300,7 +307,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、轮次用量浮层；共 60 个测试。
+auth.json）与失败隔离、会话头注入、轮次用量浮层；共 67 个测试。
 
 ## 许可证
 

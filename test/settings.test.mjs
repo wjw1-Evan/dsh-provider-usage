@@ -28,6 +28,7 @@ function boot({ config = {}, entries = [], credentialMap = CREDS, settings, port
 	if (resolved.updateCheck === undefined) resolved.updateCheck = false;
 	if (resolved.commandCodeAuthFile === undefined) resolved.commandCodeAuthFile = "/nonexistent/commandcode-auth.json";
 	if (resolved.opencodeConsoleEnabled === undefined) resolved.opencodeConsoleEnabled = false;
+	if (resolved.autoUpdate === undefined) resolved.autoUpdate = false;
 	host.apply(ctx, resolved);
 	return { ctx, routes, commands, config: resolved };
 }
