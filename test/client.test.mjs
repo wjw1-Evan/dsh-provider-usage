@@ -97,6 +97,10 @@ test("apply registers the sidebar widget and the Plugins-panel config page", () 
 	assert.ok(locales[0].tables.en["widget.brand"]);
 	assert.equal(locales[0].tables.zh["window.rolling"], "5 小时窗口");
 	assert.equal(locales[0].tables.zh["window.five-hour"], "5 小时窗口");
+	assert.equal(locales[0].tables.zh["cfg.invite"], "推广链接");
+	assert.equal(locales[0].tables.en["cfg.invite"], "Referral link");
+	assert.ok(locales[0].tables.zh["cfg.invite.copy"]);
+	assert.ok(locales[0].tables.en["cfg.invite.copy"]);
 
 	const widget = registrations.find((entry) => entry.options.name === "sidebar.footer.action");
 	assert.ok(widget !== undefined, "sidebar.footer.action registered");
@@ -214,6 +218,46 @@ test("balance deltas compare only providers with a changed balance", () => {
 	assert.equal(exports.formatDeltaShort({ amount: 1.5, currency: "USD" }), "+1.5");
 	assert.deepEqual(exports.balanceDeltasBetween(null, current), {});
 	assert.deepEqual(exports.balanceDeltasBetween(previous, [{ id: "glm", status: "error" }]), {});
+});
+
+test("the GLM card on the settings page carries the referral link", () => {
+	const exports = loadExports();
+	const value = {
+		opencodeGoEnabled: true,
+		opencodeGoApiKeyEnv: "OPENCODE_GO_API_KEY",
+		commandCodeEnabled: true,
+		commandCodeApiKeyEnv: "COMMANDCODE_API_KEY",
+		glmEnabled: true,
+		glmApiKeyEnv: "ZAI_API_KEY",
+		providerOrder: ["opencode-go", "command-code", "glm"]
+	};
+	// SettingsPage hooks: state, form, busy, message, draggingId, then two refs.
+	react.reset();
+	react.seed(0, { phase: "ready", revision: 3, value: value, detection: null, error: null });
+	react.seed(1, value);
+	react.seed(2, { save: false, reload: false });
+	react.seed(3, null);
+	react.seed(4, null);
+
+	const page = exports.SettingsPage({ t: (key) => key });
+	const tree = JSON.stringify(page);
+	assert.match(tree, /https:\/\/zcode\.z\.ai\/invite\/SMBZKGEF/, "the invitation URL is rendered in the GLM card");
+	assert.match(tree, /"key":"invite"/, "the GLM card gets the invite row");
+});
+
+test("the referral row links out and offers a copy button", () => {
+	const exports = loadExports();
+	assert.equal(exports.GLM_INVITE_URL, "https://zcode.z.ai/invite/SMBZKGEF");
+
+	react.reset();
+	const row = exports.InviteLink({ t: (key) => key, url: exports.GLM_INVITE_URL });
+	const tree = JSON.stringify(row);
+	assert.match(tree, /"type":"a"/, "the URL is a real anchor");
+	assert.match(tree, /"href":"https:\/\/zcode\.z\.ai\/invite\/SMBZKGEF"/);
+	assert.match(tree, /"target":"_blank"/);
+	assert.match(tree, /"rel":"noreferrer"/);
+	assert.match(tree, /cfg\.invite\.copy/, "a copy button is present");
+	assert.doesNotMatch(tree, /方便|积分|首单/, "no marketing copy is rendered");
 });
 
 test("the settings button opens this bundle in the Plugins panel", () => {

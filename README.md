@@ -58,6 +58,9 @@ panel settings page — extended from one provider to three.
 - **Bundle settings page** — sidebar **Plugins** panel → this bundle's card:
   enable/disable each provider, edit credential refs and endpoints, choose the
   GLM region, and see non-network detection status. Save applies immediately.
+  The GLM card also carries the **referral link** (Z.ai "Invite Friends, Get
+  Credits") as a clickable, copyable row. The URL is a bundle constant: it never
+  goes through the settings route and a settings save cannot overwrite it.
 - **`/provider-usage` chat command** — prints every enabled provider's numbers
   as text.
 - **Time bars** — under each quota bar, gray is time already elapsed and blue is
