@@ -56,6 +56,14 @@ test("GET usage returns all three providers in display order", async () => {
 	assert.equal(Math.round(cc.windows.find((window) => window.key === "monthly").percent * 100) / 100, 51.86);
 	assert.equal(glm.status, "ok");
 	assert.deepEqual(glm.windows.map((window) => window.key), ["five-hour", "weekly", "mcp"]);
+	// The 5-hour window uses the same label key for every provider, so the
+	// widget and the turn-usage card cannot drift apart again.
+	const fiveHourKeys = [
+		go.windows.find((window) => window.key === "rolling").labelKey,
+		cc.windows.find((window) => window.key === "five-hour").labelKey,
+		glm.windows.find((window) => window.key === "five-hour").labelKey
+	];
+	assert.deepEqual(fiveHourKeys, ["window.rolling", "window.rolling", "window.rolling"]);
 	assert.equal(res.body.sessionHeader.active, true);
 });
 
