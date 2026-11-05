@@ -35,6 +35,12 @@ panel settings page — extended from one provider to three.
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
   console token is auto-discovered from `OPENCODE_CONSOLE_TOKEN`, the OpenCode
   CLI auth file, or its local `opencode.db`; the token never leaves the host.
+- **Turn usage card** — when a turn finishes and the conversation used OpenCode
+  GO, Command Code or GLM Code Plan, a floating card in the top-right shows that
+  provider's latest quota windows and balance. It listens to the current
+  session's `turn/end` and `assistant/message` provider metadata and ignores
+  turns that used only other providers. The card auto-dismisses after 12 s and
+  has a close button.
 - **Same-origin proxy** — the browser only talks to `/provider-usage/usage` and
   `/provider-usage/settings`; API keys stay in the host process.
 - **Failure isolation** — one broken provider never hides the other two. The
@@ -308,6 +314,8 @@ by the current `llm/stream` call. The base comes from
 - Node.js ≥ 18 (global `fetch`, `AbortSignal.timeout`).
 - `dsh-opencode-go` is optional; its absence is a normal fallback.
 - Command Code's CLI auth file is optional if `COMMANDCODE_API_KEY` is set.
+- The turn usage card uses the `shell.overlay` slot plus the `sessions` /
+  `uiSession` client services; a runtime without them loses only the card.
 - A DSH runtime that does not expose `plugins.bundle.config` loses only the
   settings page; the sidebar widget and `/provider-usage` keep working. Set the
   config fields in the profile patch or the auto-generated form instead.
@@ -324,7 +332,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 56 tests, all offline.
+isolation, and the session-header injection. 58 tests, all offline.
 
 ## License
 

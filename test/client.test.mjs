@@ -183,6 +183,67 @@ test("all providers render in one column and each header collapses independently
 	assert.ok(secondProviders.props.children[1].props.children[1] !== null, "sibling stays expanded");
 });
 
+test("provider routes map to the three quota providers", () => {
+	const exports = loadExports();
+	assert.equal(exports.usageProviderFor("opencode-go"), "opencode-go");
+	assert.equal(exports.usageProviderFor("opencode"), "opencode-go");
+	assert.equal(exports.usageProviderFor("zai-coding-cn"), "glm");
+	assert.equal(exports.usageProviderFor("command-code"), "command-code");
+	assert.equal(exports.usageProviderFor("commandcode"), "command-code");
+	assert.equal(exports.usageProviderFor("deepseek-official"), null);
+	assert.equal(exports.usageProviderFor(""), null);
+});
+
+test("the turn-usage card registers in the shell overlay and renders windows", () => {
+	const exports = loadExports();
+	const registrations = [];
+	const ctx = {
+		effect: (fn) => { fn(); return () => {}; },
+		locale: { register: () => () => {} },
+		slots: {
+			inject: (_name, callback) => { callback(); },
+			register: (options, component) => {
+				registrations.push({ options, component });
+				return () => {};
+			}
+		},
+		get: (name) => name === "sessions"
+			? { binding: () => null }
+			: name === "uiSession"
+				? { current: { getSnapshot: () => ({ key: undefined }), subscribe: () => () => {} } }
+				: undefined
+	};
+	exports.apply(ctx);
+	const toast = registrations.find((entry) => entry.options.name === "shell.overlay");
+	assert.ok(toast !== undefined, "shell.overlay registered");
+	assert.equal(toast.options.id, pkg.name + ":turn-usage");
+
+	react.reset();
+	react.seed(0, "session-1");
+	react.seed(1, {
+		status: "ready",
+		providers: [{
+			id: "opencode-go",
+			name: "OpenCode GO",
+			status: "ok",
+			balance: { amount: 4.88, currency: "USD" },
+			windows: [
+				{ key: "rolling", percent: 0, status: "ok" },
+				{ key: "weekly", percent: 0, status: "ok" },
+				{ key: "monthly", percent: 100, status: "rate-limited" }
+			]
+		}]
+	});
+	const Component = exports.createTurnUsageToast({ sessions: {}, uiSession: {} });
+	const card = Component({ t: (key) => key });
+	assert.equal(card.type, "div");
+	assert.equal(card.props.className, "dpu-toast");
+	const text = JSON.stringify(card);
+	assert.match(text, /OpenCode GO/);
+	assert.match(text, /turnUsage.window.5h/);
+	assert.match(text, /dpu-toast-window dpu-over/);
+});
+
 test("top-level bundle code does not collide with another plugin's globals", () => {
 	// The shell evaluates every client bundle as a classic script in one shared
 	// global lexical scope. Another plugin may declare `PACKAGE_NAME` at top
