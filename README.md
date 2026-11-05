@@ -22,7 +22,7 @@ panel settings page — extended from one provider to three.
   top-up balance. Click a provider header to collapse/expand that provider's
   plan windows, quota bars and time bars; the collapse state is remembered
   locally, so any subset can stay folded.
-- **OpenCode GO** — rolling (5 h), weekly and monthly windows. Prefers the live
+- **OpenCode GO** — 5-hour, weekly and monthly windows (the API calls the 5-hour field `rolling`). Prefers the live
   `dsh-opencode-go` plugin's active account through its `opencodeGoUsage`
   host service, then falls back to the official `GET /v1/usage` endpoint.
 - **Command Code** — monthly credit pool, 5-hour window and weekly window from
@@ -239,8 +239,8 @@ the settings page and the auto-generated form hot-apply.
       "windows": [
         {
           "key": "rolling",
-          "labelKey": "window.rolling",
-          "hintKey": "window.rolling.hint",
+          "labelKey": "window.five-hour",
+          "hintKey": "window.five-hour.hint",
           "percent": 0,
           "status": "ok",
           "resetsAt": "2026-11-05T13:50:46.363Z",

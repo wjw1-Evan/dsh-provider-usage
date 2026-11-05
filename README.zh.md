@@ -19,7 +19,7 @@
 - **一个组件，一列显示三个服务商。** 所有启用的服务商纵向排列；每家标题带健康
   状态点、主窗口百分比和充值余额。点击某一家标题即可折叠/展开该家的套餐窗口、
   额度条和时间条；折叠状态本地保存，可长期只展开需要看的几家。
-- **OpenCode GO** — 滚动窗口（5 小时）、周窗口、月窗口。优先读取
+- **OpenCode GO** — 5 小时窗口、周窗口、月窗口（API 中 5 小时字段名为 `rolling`）。优先读取
   `dsh-opencode-go` 插件当前账号的 `opencodeGoUsage` 宿主服务，失败时回退到官方
   `GET /v1/usage`。
 - **Command Code** — 月度额度池、5 小时窗口、周窗口，数据来自官方
@@ -211,8 +211,8 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
       "windows": [
         {
           "key": "rolling",
-          "labelKey": "window.rolling",
-          "hintKey": "window.rolling.hint",
+          "labelKey": "window.five-hour",
+          "hintKey": "window.five-hour.hint",
           "percent": 0,
           "status": "ok",
           "resetsAt": "2026-11-05T13:50:46.363Z",

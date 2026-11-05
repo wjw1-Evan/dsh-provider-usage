@@ -64,7 +64,7 @@ test("GET usage returns all three providers in display order", async () => {
 		cc.windows.find((window) => window.key === "five-hour").labelKey,
 		glm.windows.find((window) => window.key === "five-hour").labelKey
 	];
-	assert.deepEqual(fiveHourKeys, ["window.rolling", "window.rolling", "window.rolling"]);
+	assert.deepEqual(fiveHourKeys, ["window.five-hour", "window.five-hour", "window.five-hour"]);
 	assert.equal(res.body.sessionHeader.active, true);
 });
 
