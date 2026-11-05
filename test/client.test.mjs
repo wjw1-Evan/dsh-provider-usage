@@ -95,6 +95,8 @@ test("apply registers the sidebar widget and the Plugins-panel config page", () 
 	assert.deepEqual(locales.map((entry) => entry.ns), ["dsh-multi-provider-usage"]);
 	assert.ok(locales[0].tables.zh["widget.brand"]);
 	assert.ok(locales[0].tables.en["widget.brand"]);
+	assert.equal(locales[0].tables.zh["window.rolling"], "5 小时窗口");
+	assert.equal(locales[0].tables.zh["window.five-hour"], "5 小时窗口");
 
 	const widget = registrations.find((entry) => entry.options.name === "sidebar.footer.action");
 	assert.ok(widget !== undefined, "sidebar.footer.action registered");
