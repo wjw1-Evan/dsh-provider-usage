@@ -31,8 +31,9 @@
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
   OpenCode CLI 的 auth.json 或本机 `opencode.db` 自动发现，令牌不会离开宿主进程。
 - **每轮用量浮层** — 对话轮次结束时，如果本轮使用了 OpenCode GO、Command Code
-  或 GLM Code Plan，右上角会浮出该服务商最新的套餐窗口和充值余额；只使用其他
-  服务商时不会弹出。浮层 12 秒后自动消失，也可手动关闭。
+  或 GLM Code Plan，右上角会浮出该服务商最新的套餐窗口、充值余额，以及本轮
+  余额变化（轮次开始快照 vs 刷新后的余额）；只使用其他服务商时不会弹出。浮层
+  12 秒后自动消失，也可手动关闭。
 - **同源代理** — 浏览器只访问 `/provider-usage/usage` 和
   `/provider-usage/settings`，API Key 始终留在宿主进程。
 - **故障隔离** — 一个服务商失败不会影响另外两个；只要还有服务商成功，路由就返回
@@ -299,7 +300,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、轮次用量浮层；共 59 个测试。
+auth.json）与失败隔离、会话头注入、轮次用量浮层；共 60 个测试。
 
 ## 许可证
 

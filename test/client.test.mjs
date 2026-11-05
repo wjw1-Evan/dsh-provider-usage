@@ -183,6 +183,19 @@ test("all providers render in one column and each header collapses independently
 	assert.ok(secondProviders.props.children[1].props.children[1] !== null, "sibling stays expanded");
 });
 
+test("balance deltas are computed from the turn-start snapshot", () => {
+	const exports = loadExports();
+	const baseline = { "opencode-go": { amount: 5.14, currency: "USD" } };
+	const current = { id: "opencode-go", balance: { amount: 4.88, currency: "USD" } };
+	const change = exports.balanceChangeFor(baseline, current);
+	assert.deepEqual(change, { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 });
+	assert.equal(exports.formatSignedMoney(change), "-$0.26");
+	assert.equal(exports.formatSignedMoney({ amount: 1.5, currency: "USD" }), "+$1.50");
+	assert.equal(exports.formatSignedMoney({ amount: 0, currency: "USD" }), "$0.00");
+	assert.equal(exports.balanceChangeFor(null, current), null);
+	assert.equal(exports.balanceChangeFor(baseline, { id: "glm", status: "error" }), null);
+});
+
 test("turn events collect only quota-provider usage and fire on turn end", () => {
 	const exports = loadExports();
 	let state = { used: new Set(), show: null };
@@ -245,6 +258,7 @@ test("the turn-usage card registers in the shell overlay and renders windows", (
 			name: "OpenCode GO",
 			status: "ok",
 			balance: { amount: 4.88, currency: "USD" },
+			balanceChange: { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 },
 			windows: [
 				{ key: "rolling", percent: 0, status: "ok" },
 				{ key: "weekly", percent: 0, status: "ok" },
@@ -260,6 +274,8 @@ test("the turn-usage card registers in the shell overlay and renders windows", (
 	assert.match(text, /OpenCode GO/);
 	assert.match(text, /turnUsage.window.5h/);
 	assert.match(text, /dpu-toast-window dpu-over/);
+	assert.match(text, /turnUsage.balanceChange/);
+	assert.match(text, /-\$0\.26/);
 });
 
 test("top-level bundle code does not collide with another plugin's globals", () => {

@@ -37,7 +37,8 @@ panel settings page — extended from one provider to three.
   CLI auth file, or its local `opencode.db`; the token never leaves the host.
 - **Turn usage card** — when a turn finishes and the conversation used OpenCode
   GO, Command Code or GLM Code Plan, a floating card in the top-right shows that
-  provider's latest quota windows and balance. It listens to the current
+  provider's latest quota windows, balance and balance change for the turn
+  (turn-start snapshot vs. the refreshed balance). It listens to the current
   session's `turn/end` and `assistant/message` provider metadata and ignores
   turns that used only other providers. The card auto-dismisses after 12 s and
   has a close button.
