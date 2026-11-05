@@ -159,6 +159,7 @@ test("all providers render in one column and each header collapses independently
 		defaultProvider: "auto",
 		autoUpdate: { status: "updated", restartRequired: true, version: "0.3.1" }
 	};
+	data.providers[0].fallback = { from: "opencode-go", reason: "not-installed", message: "fixture" };
 	react.reset();
 	react.seed(0, data);
 	react.seed(1, null);
@@ -175,6 +176,8 @@ test("all providers render in one column and each header collapses independently
 	const head = firstSection.props.children[0];
 	assert.equal(head.props.className, "dpu-provider-head");
 	assert.equal(head.props["aria-expanded"], true);
+	assert.match(JSON.stringify(head), /dpu-badge/, "the fallback badge belongs in the header");
+	assert.doesNotMatch(JSON.stringify(firstSection.props.children[1]), /dpu-badge/, "the fallback badge must not wrap to the body");
 	assert.ok(firstSection.props.children[1] !== null, "expanded by default");
 
 	head.props.onClick();
