@@ -28,15 +28,13 @@ jobs:
         run: npm install --no-audit --no-fund --package-lock=false
       - name: Test
         run: npm test
-      - name: Publish (trusted publishing)
-        # The default path: the job exchanges its OIDC token for a short-lived
-        # npm credential. Nothing secret is stored in the repository.
-        if: ${{ secrets.NPM_TOKEN == '' }}
-        run: npm publish --access public --provenance
-      - name: Publish (token fallback)
-        # Only used when a granular token is configured as NPM_TOKEN; setting an
-        # empty NODE_AUTH_TOKEN would make npm treat the run as authenticated.
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm publish --access public --provenance
+      - name: Publish
+        # NPM_TOKEN (a granular token with 2FA bypass) is used when present.
+        # Without it the variable is unset, so npm falls back to trusted
+        # publishing: the job exchanges its OIDC token for a short-lived
+        # credential and no secret needs to live in the repository.
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then unset NODE_AUTH_TOKEN; fi
+          npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
