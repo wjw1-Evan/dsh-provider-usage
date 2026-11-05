@@ -87,7 +87,7 @@ test("readCommandCode derives the monthly, 5-hour and weekly windows", async () 
 	assert.equal(result.id, "command-code");
 	assert.equal(result.account.name, "Evan");
 	assert.equal(result.plan.name, "GOAT");
-	assert.deepEqual(result.windows.map((window) => window.key), ["monthly", "five-hour", "weekly"]);
+	assert.deepEqual(result.windows.map((window) => window.key), ["five-hour", "weekly", "monthly"]);
 	const monthly = result.windows.find((window) => window.key === "monthly");
 	assert.equal(Math.round(monthly.percent * 100) / 100, 51.86);
 	assert.equal(monthly.resetsAt, "2026-11-30T16:48:56.000Z");

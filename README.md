@@ -142,7 +142,7 @@ path and never touches the other plugin.
 | Provider | Windows | Window length |
 |---|---|---|
 | OpenCode GO | `rolling`, `weekly`, `monthly` | 5 h, 7 d, ~30 d |
-| Command Code | `monthly`, `five-hour`, `weekly` | real billing period, 5 h, 7 d |
+| Command Code | `five-hour`, `weekly`, `monthly` | 5 h, 7 d, real billing period |
 | GLM Code Plan | `five-hour`, `weekly`, `mcp` | 5 h, 7 d, monthly |
 
 Percentages are **used** percentages and are clamped to `[0, 100]` for display.

@@ -121,7 +121,7 @@ provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`；组件�
 | 服务商 | 窗口 | 窗口长度 |
 |---|---|---|
 | OpenCode GO | `rolling`、`weekly`、`monthly` | 5 小时、7 天、约 30 天 |
-| Command Code | `monthly`、`five-hour`、`weekly` | 真实账单周期、5 小时、7 天 |
+| Command Code | `five-hour`、`weekly`、`monthly` | 5 小时、7 天、真实账单周期 |
 | GLM Code Plan | `five-hour`、`weekly`、`mcp` | 5 小时、7 天、月度 |
 
 百分比表示**已使用**比例，显示时限制在 `[0, 100]`。Command Code 的月用量为
