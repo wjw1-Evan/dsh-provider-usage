@@ -156,7 +156,8 @@ test("all providers render in one column and each header collapses independently
 			provider("command-code", "Command Code", 51.9, 7.44),
 			provider("glm", "GLM Code Plan", 12.3, 0)
 		],
-		defaultProvider: "auto"
+		defaultProvider: "auto",
+		autoUpdate: { status: "updated", restartRequired: true, version: "0.3.1" }
 	};
 	react.reset();
 	react.seed(0, data);
@@ -169,6 +170,7 @@ test("all providers render in one column and each header collapses independently
 	assert.equal(providers.props.children.length, 3);
 	const names = providers.props.children.map((section) => section.props.children[0].props.children[2].props.children);
 	assert.deepEqual(names, ["OpenCode GO", "Command Code", "GLM Code Plan"]);
+	assert.match(JSON.stringify(first), /autoUpdate\.updated/);
 	const firstSection = providers.props.children[0];
 	const head = firstSection.props.children[0];
 	assert.equal(head.props.className, "dpu-provider-head");
