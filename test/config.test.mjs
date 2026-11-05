@@ -33,7 +33,7 @@ test("the exported Config schema carries every provider knob", () => {
 		"autoUpdate",
 		"autoUpdateCheckHours",
 		"injectSessionHeader",
-		"defaultProvider"
+		"providerOrder"
 	]) {
 		assert.ok(Object.hasOwn(dict, key), `Config has ${key}`);
 	}
@@ -42,8 +42,11 @@ test("the exported Config schema carries every provider knob", () => {
 test("normalizers are closed sets with documented defaults", () => {
 	assert.equal(host.normalizeOpencodeGoSource("builtin"), "builtin");
 	assert.equal(host.normalizeOpencodeGoSource("bogus"), "opencode-go");
-	assert.equal(host.normalizeDefaultProvider("glm"), "glm");
-	assert.equal(host.normalizeDefaultProvider("bogus"), "auto");
+	assert.deepEqual(
+		host.normalizeProviderOrder(["glm", "bogus", "opencode-go", "glm"]),
+		["glm", "opencode-go", "command-code"]
+	);
+	assert.deepEqual(host.normalizeProviderOrder("bogus"), ["opencode-go", "command-code", "glm"]);
 	assert.equal(host.normalizeGlmRegion("bigmodel"), "bigmodel");
 	assert.equal(host.normalizeGlmRegion("bogus"), "auto");
 });

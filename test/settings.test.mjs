@@ -37,7 +37,7 @@ const DEFAULTS = {
 	opencodeGoEnabled: true,
 	commandCodeEnabled: true,
 	glmEnabled: true,
-	defaultProvider: "auto"
+	providerOrder: ["glm", "opencode-go", "command-code"]
 };
 
 test("GET settings returns the descriptor value, revision and detection", async () => {
@@ -50,7 +50,7 @@ test("GET settings returns the descriptor value, revision and detection", async 
 	assert.equal(res.body.namespace, "dsh-multi-provider-usage");
 	assert.equal(res.body.revision, 7);
 	assert.equal(res.body.value.opencodeGoEnabled, true);
-	assert.equal(res.body.detection.defaultProvider, "auto");
+	assert.deepEqual(res.body.detection.providerOrder, ["opencode-go", "command-code", "glm"]);
 	assert.deepEqual(res.body.detection.enabled, ["opencode-go", "command-code", "glm"]);
 
 	const detection = res.body.detection.providers;
@@ -117,7 +117,7 @@ test("POST settings writes only whitelisted fields and answers with the new revi
 		body: JSON.stringify({
 			patch: {
 				commandCodeEnabled: false,
-				defaultProvider: "glm",
+				providerOrder: ["glm", "bogus", "opencode-go", "glm"],
 				apiKeyEnv: "HACKED",
 				baseUrl: "https://evil.example",
 				notAField: true
@@ -130,9 +130,12 @@ test("POST settings writes only whitelisted fields and answers with the new revi
 	assert.equal(res.body.ok, true);
 	assert.equal(res.body.revision, 8);
 	assert.equal(settings.updates.length, 1);
-	assert.deepEqual(settings.updates[0].patch, { commandCodeEnabled: false, defaultProvider: "glm" });
+	assert.deepEqual(settings.updates[0].patch, {
+		commandCodeEnabled: false,
+		providerOrder: ["glm", "opencode-go", "command-code"]
+	});
 	assert.deepEqual(res.body.detection.enabled, ["opencode-go", "glm"]);
-	assert.equal(res.body.detection.defaultProvider, "glm");
+	assert.deepEqual(res.body.detection.providerOrder, ["glm", "opencode-go", "command-code"]);
 });
 
 test("POST settings accepts the console balance fields", async () => {

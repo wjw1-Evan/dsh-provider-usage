@@ -196,7 +196,7 @@ the settings page and the auto-generated form hot-apply.
 | `autoUpdate` | `true` | Check GitHub releases; fast-forward a clean local checkout |
 | `autoUpdateCheckHours` | `6` | Hours between auto-update checks (1–168) |
 | `injectSessionHeader` | `true` | OpenCode GO session-header fix |
-| `defaultProvider` | `"auto"` | Provider pinned first in the column (`auto`, `opencode-go`, `command-code`, `glm`) |
+| `providerOrder` | all three ids | Provider display order in the widget; drag the cards in the plugin settings to reorder |
 
 `glmRegion: "custom"` requires `glmBaseUrl`; `auto` probes
 `https://api.z.ai` first and then `https://open.bigmodel.cn`.
@@ -211,7 +211,7 @@ the settings page and the auto-generated form hot-apply.
 {
   "ok": true,
   "enabled": ["opencode-go", "command-code", "glm"],
-  "defaultProvider": "auto",
+  "providerOrder": ["opencode-go", "command-code", "glm"],
   "providers": [
     {
       "id": "opencode-go",
@@ -269,7 +269,7 @@ Returns the settings descriptor (`namespace`, `revision`, `value`, `base`,
   "revision": 0,
   "value": { "opencodeGoEnabled": true },
   "detection": {
-    "defaultProvider": "auto",
+    "providerOrder": ["opencode-go", "command-code", "glm"],
     "enabled": ["opencode-go", "command-code", "glm"],
     "providers": {
       "opencode-go": { "configured": true, "entryFound": false, "fallback": { "...": "..." } },
@@ -290,7 +290,7 @@ Only the fields in the table above are accepted; anything else is ignored.
 
 ```json
 {
-  "patch": { "commandCodeEnabled": false, "defaultProvider": "glm" },
+  "patch": { "commandCodeEnabled": false, "providerOrder": ["glm", "opencode-go", "command-code"] },
   "expectedRevision": 0
 }
 ```

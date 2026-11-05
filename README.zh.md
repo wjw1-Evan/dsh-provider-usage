@@ -169,7 +169,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `autoUpdate` | `true` | 检查 GitHub Release；干净本地 checkout 自动 fast-forward |
 | `autoUpdateCheckHours` | `6` | 自动更新检查间隔（1–168 小时） |
 | `injectSessionHeader` | `true` | OpenCode GO 会话头修复 |
-| `defaultProvider` | `"auto"` | 置顶显示的服务商（`auto`、`opencode-go`、`command-code`、`glm`） |
+| `providerOrder` | 三个 id 全集 | 组件中的显示顺序；在插件设置里拖动卡片调整 |
 
 `glmRegion: "custom"` 必须提供 `glmBaseUrl`；`auto` 先探测
 `https://api.z.ai`，再探测 `https://open.bigmodel.cn`。
@@ -184,7 +184,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 {
   "ok": true,
   "enabled": ["opencode-go", "command-code", "glm"],
-  "defaultProvider": "auto",
+  "providerOrder": ["opencode-go", "command-code", "glm"],
   "providers": [
     {
       "id": "opencode-go",
@@ -241,7 +241,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
   "revision": 0,
   "value": { "opencodeGoEnabled": true },
   "detection": {
-    "defaultProvider": "auto",
+    "providerOrder": ["opencode-go", "command-code", "glm"],
     "enabled": ["opencode-go", "command-code", "glm"],
     "providers": {
       "opencode-go": { "configured": true, "entryFound": false, "fallback": { "...": "..." } },
@@ -260,7 +260,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 
 ```json
 {
-  "patch": { "commandCodeEnabled": false, "defaultProvider": "glm" },
+  "patch": { "commandCodeEnabled": false, "providerOrder": ["glm", "opencode-go", "command-code"] },
   "expectedRevision": 0
 }
 ```

@@ -48,7 +48,7 @@ test("GET usage returns all three providers in display order", async () => {
 	assert.equal(res.body.ok, true);
 	assert.deepEqual(res.body.providers.map((provider) => provider.id), ["opencode-go", "command-code", "glm"]);
 	assert.deepEqual(res.body.enabled, ["opencode-go", "command-code", "glm"]);
-	assert.equal(res.body.defaultProvider, "auto");
+	assert.deepEqual(res.body.providerOrder, ["opencode-go", "command-code", "glm"]);
 
 	const [go, cc, glm] = res.body.providers;
 	assert.equal(go.status, "ok");
