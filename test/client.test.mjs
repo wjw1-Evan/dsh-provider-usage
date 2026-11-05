@@ -162,6 +162,7 @@ test("all providers render in one column and each header collapses independently
 	data.providers[0].fallback = { from: "opencode-go", reason: "not-installed", message: "fixture" };
 	data.providers[1].account = { name: "Evan", ref: "REF", id: null };
 	data.providers[1].plan = { id: "individual-goat", name: "GOAT", status: "active" };
+	exports.publishTurnBalance("opencode-go", { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 });
 	react.reset();
 	react.seed(0, data);
 	react.seed(1, null);
@@ -179,6 +180,8 @@ test("all providers render in one column and each header collapses independently
 	assert.equal(head.props.className, "dpu-provider-head");
 	assert.equal(head.props["aria-expanded"], true);
 	assert.match(JSON.stringify(head), /dpu-badge/, "the fallback badge belongs in the header");
+	assert.match(JSON.stringify(head), /dpu-provider-balance dpu-down/, "the balance delta is red");
+	assert.match(JSON.stringify(head), /-\$0\.26/, "the balance badge shows the turn delta");
 	assert.doesNotMatch(JSON.stringify(firstSection.props.children[1]), /dpu-sub/, "metadata must not wrap to a second line");
 	assert.ok(firstSection.props.children[1] !== null, "expanded by default");
 
@@ -192,6 +195,7 @@ test("all providers render in one column and each header collapses independently
 	assert.match(JSON.stringify(ccHead), /dpu-account/);
 	assert.match(JSON.stringify(ccHead), /dpu-plan/);
 	assert.match(JSON.stringify(ccHead), /GOAT/);
+	exports.clearTurnBalances();
 });
 
 test("balance deltas are computed from the turn-start snapshot", () => {
@@ -266,7 +270,7 @@ test("provider routes map to the three quota providers", () => {
 	assert.equal(exports.usageProviderFor(""), null);
 });
 
-test("the turn-usage card registers in the shell overlay and renders windows", () => {
+test("the turn-balance tracker registers in the shell overlay without a popup", () => {
 	const exports = loadExports();
 	const registrations = [];
 	const ctx = {
@@ -286,37 +290,13 @@ test("the turn-usage card registers in the shell overlay and renders windows", (
 				: undefined
 	};
 	exports.apply(ctx);
-	const toast = registrations.find((entry) => entry.options.name === "shell.overlay");
-	assert.ok(toast !== undefined, "shell.overlay registered");
-	assert.equal(toast.options.id, pkg.name + ":turn-usage");
+	const tracker = registrations.find((entry) => entry.options.name === "shell.overlay");
+	assert.ok(tracker !== undefined, "shell.overlay registered");
+	assert.equal(tracker.options.id, pkg.name + ":turn-balance");
 
 	react.reset();
-	react.seed(0, "session-1");
-	react.seed(1, {
-		status: "ready",
-		providers: [{
-			id: "opencode-go",
-			name: "OpenCode GO",
-			status: "ok",
-			balance: { amount: 4.88, currency: "USD" },
-			balanceChange: { amount: -0.26, currency: "USD", from: 5.14, to: 4.88 },
-			windows: [
-				{ key: "rolling", percent: 0, status: "ok" },
-				{ key: "weekly", percent: 0, status: "ok" },
-				{ key: "monthly", percent: 100, status: "rate-limited" }
-			]
-		}]
-	});
-	const Component = exports.createTurnUsageToast({ sessions: {}, uiSession: {} });
-	const card = Component({ t: (key) => key });
-	assert.equal(card.type, "div");
-	assert.equal(card.props.className, "dpu-toast");
-	const text = JSON.stringify(card);
-	assert.match(text, /OpenCode GO/);
-	assert.match(text, /turnUsage.window.5h/);
-	assert.match(text, /dpu-toast-window dpu-over/);
-	assert.match(text, /turnUsage.balanceChange/);
-	assert.match(text, /-\$0\.26/);
+	const Component = exports.createTurnBalanceTracker({ sessions: {}, uiSession: {} });
+	assert.equal(Component({}), null, "the tracker renders no popup");
 });
 
 test("top-level bundle code does not collide with another plugin's globals", () => {

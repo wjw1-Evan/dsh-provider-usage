@@ -42,13 +42,13 @@ panel settings page — extended from one provider to three.
   npm/market-installed copy is never modified by the plugin: it reports the
   available version and points at the plugin market. The plugin never restarts
   DSH by itself.
-- **Turn usage card** — when a turn finishes and the conversation used OpenCode
-  GO, Command Code or GLM Code Plan, a floating card in the top-right shows that
-  provider's latest quota windows, balance and balance change for the turn
-  (turn-start snapshot vs. the refreshed balance). It listens to the current
-  session's `turn/end` and `assistant/message` provider metadata and ignores
-  turns that used only other providers. The card auto-dismisses after 12 s and
-  has a close button.
+- **Balance-change animation** — when a turn finishes and the conversation
+  used OpenCode GO, Command Code or GLM Code Plan, the provider's balance badge
+  in the widget briefly animates to that turn's delta (red for a decrease,
+  green for an increase), then shows the refreshed balance again. There is no
+  popup. It listens to the current session's `turn/end` and
+  `assistant/message` provider metadata and ignores turns that used only other
+  providers.
 - **Same-origin proxy** — the browser only talks to `/provider-usage/usage` and
   `/provider-usage/settings`; API keys stay in the host process.
 - **Failure isolation** — one broken provider never hides the other two. The
@@ -327,8 +327,9 @@ by the current `llm/stream` call. The base comes from
 - Node.js ≥ 18 (global `fetch`, `AbortSignal.timeout`).
 - `dsh-opencode-go` is optional; its absence is a normal fallback.
 - Command Code's CLI auth file is optional if `COMMANDCODE_API_KEY` is set.
-- The turn usage card uses the `shell.overlay` slot plus the `sessions` /
-  `uiSession` client services; a runtime without them loses only the card.
+- The balance animation uses an invisible `shell.overlay` tracker plus the
+  `sessions` / `uiSession` client services; a runtime without them loses only
+  the animation.
 - A DSH runtime that does not expose `plugins.bundle.config` loses only the
   settings page; the sidebar widget and `/provider-usage` keep working. Set the
   config fields in the profile patch or the auto-generated form instead.
