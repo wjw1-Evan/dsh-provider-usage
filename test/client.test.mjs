@@ -183,6 +183,23 @@ test("all providers render in one column and each header collapses independently
 	assert.ok(secondProviders.props.children[1].props.children[1] !== null, "sibling stays expanded");
 });
 
+test("turn events collect only quota-provider usage and fire on turn end", () => {
+	const exports = loadExports();
+	let state = { used: new Set(), show: null };
+	const apply = (event) => { state = exports.turnUsageStep(state.used, event); };
+	apply({ type: "turn/start" });
+	apply({ type: "assistant/message", data: { message: { source: { provider: "deepseek-official" } } } });
+	assert.deepEqual(state.show, null);
+	apply({ type: "assistant/message", data: { message: { source: { provider: "opencode-go" } } } });
+	apply({ type: "assistant/message", data: { message: { source: { provider: "zai-coding-cn" } } } });
+	apply({ type: "turn/end" });
+	assert.deepEqual(state.show, ["opencode-go", "glm"]);
+	assert.equal(state.used.size, 0);
+	apply({ type: "turn/start" });
+	apply({ type: "turn/end" });
+	assert.equal(state.show, null, "empty turns do not pop up");
+});
+
 test("provider routes map to the three quota providers", () => {
 	const exports = loadExports();
 	assert.equal(exports.usageProviderFor("opencode-go"), "opencode-go");

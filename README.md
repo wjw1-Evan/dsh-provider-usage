@@ -332,7 +332,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 58 tests, all offline.
+isolation, and the session-header injection. 59 tests, all offline.
 
 ## License
 
