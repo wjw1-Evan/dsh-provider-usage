@@ -34,11 +34,12 @@
   设置页内为分步引导：可复制的登录命令、控制台网页链接与「重新检测」按钮。
   Command Code 的悬停提示会拆成「购买 + 免费」；credits 响应没有这两个池时显示
   灰色「无充值额度」。
-- **自动更新** — 宿主启动后以及按配置的间隔检查 GitHub Release。本地
-  `link:`/`file:` 目录检出在「main 分支、工作区干净、可严格 fast-forward」时直接
-  `git pull`；npm / 市场 / tarball 安装的副本则下载该 Release 的 tarball，先写临时
-  文件再 `rename` 覆盖 `lib/`、`package.json`、`cordis.patch.yml` 等打包文件——不会
-  就地改写 pnpm store 的硬链接。两种方式完成后，运行中的宿主仍持有旧模块，所以
+- **自动更新** — 宿主启动后以及按配置的间隔，同时向 npm registry、npmmirror 镜像与
+  GitHub Release 查询，以其中报告的最新版本为准。本地 `link:`/`file:` 目录检出在
+  「main 分支、工作区干净、可严格 fast-forward」时直接 `git pull`；npm / 市场 / tarball
+  安装的副本按「npm → npmmirror → GitHub」依次尝试下载 tarball，先写临时文件再
+  `rename` 覆盖 `lib/`、`package.json`、`cordis.patch.yml` 等打包文件——不会就地
+  改写 pnpm store 的硬链接。两种方式完成后，运行中的宿主仍持有旧模块，所以
   组件/设置页显示“已更新到 vX，重启 DSH 生效”；插件不会自行重启 DSH。
 - **余额变化动画** — 组件按正常轮询周期刷新；某个服务商的余额相比上一次轮询
   发生变化时，数字会从旧值滚动到新值，同时一个红色/绿色差值（例如 `-0.1`）
@@ -225,7 +226,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `glmRegion` | `"auto"` | `auto`、`zai`、`bigmodel`、`custom` |
 | `cacheMs` | `30000` | 单个服务商的宿主缓存 TTL |
 | `updateCheck` | `true` | npm 新版本检查（24 小时） |
-| `autoUpdate` | `true` | 检查 GitHub Release；干净 checkout 快进，安装包用 Release tarball 原地替换 |
+| `autoUpdate` | `true` | 同时查询 npm / npmmirror / GitHub Release；干净 checkout 快进，安装包按可达的源依次下载 tarball 原地替换 |
 | `autoUpdateCheckHours` | `6` | 自动更新检查间隔（1–168 小时） |
 | `injectSessionHeader` | `true` | OpenCode GO 会话头修复 |
 | `providerOrder` | 三个 id 全集 | 组件中的显示顺序；在插件设置里拖动卡片调整 |

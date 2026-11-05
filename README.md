@@ -41,14 +41,16 @@ panel settings page — extended from one provider to three.
   Code's tooltip breaks its amount into purchased + free credits; a credits
   response without either pool renders a muted **No top-up** badge.
 - **Auto-update** — on boot and every configured interval the host checks the
-  GitHub release feed. A local `link:`/`file:` checkout is fast-forwarded when it
-  is on `main`, clean, and a strict fast-forward. An npm / market / tarball copy
-  updates itself: the release tarball is unpacked and each packaged file
-  (`lib/`, `package.json`, `cordis.patch.yml`, `docs/`) is written to a temp file
-  and renamed over the target, so pnpm's hardlinked store is never edited in
-  place. Either way the running Host keeps the old module graph, so the
-  widget/settings show "updated — restart DSH". The plugin never restarts DSH by
-  itself.
+  npm registry, the npmmirror mirror and the GitHub release feed together and
+  trusts the newest version any of them reports. A local `link:`/`file:` checkout
+  is fast-forwarded when it is on `main`, clean, and a strict fast-forward. An
+  npm / market / tarball copy updates itself: the release tarball is downloaded
+  from the first source that serves it (registry → mirror → GitHub, in turn) and
+  each packaged file (`lib/`, `package.json`, `cordis.patch.yml`, `docs/`) is
+  written to a temp file and renamed over the target, so pnpm's hardlinked store
+  is never edited in place. Either way the running Host keeps the old module
+  graph, so the widget/settings show "updated — restart DSH". The plugin never
+  restarts DSH by itself.
 - **Balance-change animation** — the widget polls on its normal interval; when
   a provider's balance differs from the previous poll, the number counts from
   the old value to the refreshed one while a red/green delta chip (for example
@@ -267,7 +269,7 @@ the settings page and the auto-generated form hot-apply.
 | `glmRegion` | `"auto"` | `auto`, `zai`, `bigmodel`, `custom` |
 | `cacheMs` | `30000` | Per-provider host cache TTL |
 | `updateCheck` | `true` | npm update check (24 h) |
-| `autoUpdate` | `true` | Check GitHub releases; fast-forward a clean checkout, otherwise replace an installed package |
+| `autoUpdate` | `true` | Check npm, npmmirror and GitHub together; fast-forward a clean checkout, otherwise replace an installed package from the first source that serves the tarball |
 | `autoUpdateCheckHours` | `6` | Hours between auto-update checks (1–168) |
 | `injectSessionHeader` | `true` | OpenCode GO session-header fix |
 | `providerOrder` | all three ids | Provider display order in the widget; drag the cards in the plugin settings to reorder |

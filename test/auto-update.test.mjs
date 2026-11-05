@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -115,6 +116,17 @@ function releaseTarball(version = "0.3.0") {
 		[`${root}/test/ignored.test.mjs`]: "not shipped"
 	});
 }
+
+/** A fake npm registry "latest" manifest response. */
+function npmManifest(version, tarballUrl) {
+	return { ok: true, json: async () => ({ version, dist: { tarball: tarballUrl } }) };
+}
+
+const LATEST = {
+	npm: "https://registry.npmjs.org/dsh-multi-provider-usage/latest",
+	mirror: "https://registry.npmmirror.com/dsh-multi-provider-usage/latest",
+	github: "https://api.github.com/repos/wjw1-Evan/dsh-provider-usage/releases/latest"
+};
 
 test("version comparison accepts v-prefixed releases", () => {
 	assert.equal(isNewerVersion("v0.3.0", "0.2.5"), true);
@@ -288,7 +300,9 @@ test("a market-installed copy updates itself from the release tarball", async ()
 		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
 		fetchImpl: async (url) => {
 			fetched.push(String(url));
-			if (String(url).includes("releases/latest")) {
+			if (String(url) === LATEST.npm) return npmManifest("0.3.0", "https://example.test/npm.tgz");
+			if (String(url) === LATEST.mirror) return npmManifest("0.3.0", "https://example.test/mirror.tgz");
+			if (String(url) === LATEST.github) {
 				return { ok: true, json: async () => ({ tag_name: "v0.3.0", tarball_url: "https://example.test/tarball.tar.gz" }) };
 			}
 			return { ok: true, arrayBuffer: async () => tarball };
@@ -304,9 +318,11 @@ test("a market-installed copy updates itself from the release tarball", async ()
 		assert.equal(state.version, "0.3.0");
 		assert.equal(state.restartRequired, true);
 		assert.deepEqual(fetched, [
-			"https://api.github.com/repos/wjw1-Evan/dsh-provider-usage/releases/latest",
-			"https://example.test/tarball.tar.gz"
-		]);
+			LATEST.npm,
+			LATEST.mirror,
+			LATEST.github,
+			"https://example.test/npm.tgz"
+		], "the registry is checked before GitHub and its tarball wins the download");
 		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "new index");
 	} finally {
 		updater.dispose();
@@ -325,10 +341,14 @@ test("a release this session already applied is not re-downloaded until restart"
 		currentVersion: "0.2.5",
 		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
 		fetchImpl: async (url) => {
-			if (String(url).includes("releases/latest")) {
+			const u = String(url);
+			if (u === LATEST.npm || u === LATEST.mirror) {
+				return npmManifest("0.3.0", "https://example.test/tarball.tar.gz");
+			}
+			if (u === LATEST.github) {
 				return { ok: true, json: async () => ({ tag_name: "v0.3.0", tarball_url: "https://example.test/tarball.tar.gz" }) };
 			}
-			tarballDownloads.push(String(url));
+			tarballDownloads.push(u);
 			return { ok: true, arrayBuffer: async () => tarball };
 		},
 		execImpl: async () => { throw new Error("must not run git"); },
@@ -374,6 +394,7 @@ test("a failed self-update leaves an actionable notice instead of a broken insta
 		assert.equal(state.status, "available");
 		assert.equal(state.latestVersion, "0.3.0");
 		assert.match(state.message, /HTTP 500/);
+		assert.match(state.message, /all sources/, "the message lists every download source");
 		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "old index");
 	} finally {
 		updater.dispose();
@@ -398,5 +419,148 @@ test("autoUpdate=false disables the checker without touching the network", async
 		assert.equal(fetched, false);
 	} finally {
 		updater.dispose();
+	}
+});
+
+test("a package install falls back to the registry when GitHub is unreachable", async () => {
+	const dir = packageDir();
+	const tarball = releaseTarball("0.3.0");
+	const tarballDownloads = [];
+	const updater = startAutoUpdate({
+		packageDir: dir,
+		profileDir: "/tmp/profile",
+		packageName: "dsh-multi-provider-usage",
+		currentVersion: "0.2.5",
+		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
+		fetchImpl: async (url) => {
+			const u = String(url);
+			if (u === LATEST.npm) return npmManifest("0.3.0", "https://example.test/npm.tgz");
+			if (u === LATEST.mirror || u === LATEST.github) return { ok: false, status: 500, text: async () => "" };
+			if (u === "https://example.test/npm.tgz") {
+				tarballDownloads.push(u);
+				return { ok: true, arrayBuffer: async () => tarball };
+			}
+			throw new Error(`unexpected fetch: ${u}`);
+		},
+		execImpl: async () => { throw new Error("must not run git"); },
+		timers,
+		detect: () => ({ kind: "package", checkout: null }),
+		now: () => 2_000_000
+	});
+	try {
+		const state = await updater.checkNow(true);
+		assert.equal(state.status, "updated");
+		assert.equal(state.version, "0.3.0");
+		assert.deepEqual(tarballDownloads, ["https://example.test/npm.tgz"]);
+		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "new index");
+	} finally {
+		updater.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("the download falls back to the next source when the first fails", async () => {
+	const dir = packageDir();
+	const tarball = releaseTarball("0.3.0");
+	const downloads = [];
+	const updater = startAutoUpdate({
+		packageDir: dir,
+		profileDir: "/tmp/profile",
+		packageName: "dsh-multi-provider-usage",
+		currentVersion: "0.2.5",
+		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
+		fetchImpl: async (url) => {
+			const u = String(url);
+			if (u === LATEST.npm) return npmManifest("0.3.0", "https://example.test/npm.tgz");
+			if (u === LATEST.mirror) return npmManifest("0.3.0", "https://example.test/mirror.tgz");
+			if (u === LATEST.github) return { ok: false, status: 500, text: async () => "" };
+			if (u === "https://example.test/npm.tgz") {
+				downloads.push(u);
+				return { ok: false, status: 500, arrayBuffer: async () => new ArrayBuffer(0) };
+			}
+			if (u === "https://example.test/mirror.tgz") {
+				downloads.push(u);
+				return { ok: true, arrayBuffer: async () => tarball };
+			}
+			throw new Error(`unexpected fetch: ${u}`);
+		},
+		execImpl: async () => { throw new Error("must not run git"); },
+		timers,
+		detect: () => ({ kind: "package", checkout: null }),
+		now: () => 2_000_000
+	});
+	try {
+		const state = await updater.checkNow(true);
+		assert.equal(state.status, "updated");
+		assert.equal(state.version, "0.3.0");
+		assert.deepEqual(downloads, ["https://example.test/npm.tgz", "https://example.test/mirror.tgz"]);
+		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "new index");
+	} finally {
+		updater.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("every source failing the check reports an error instead of an update", async () => {
+	const dir = packageDir();
+	const updater = startAutoUpdate({
+		packageDir: dir,
+		profileDir: "/tmp/profile",
+		packageName: "dsh-multi-provider-usage",
+		currentVersion: "0.2.5",
+		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
+		fetchImpl: async () => ({ ok: false, status: 500, text: async () => "" }),
+		execImpl: async () => { throw new Error("must not run git"); },
+		timers,
+		detect: () => ({ kind: "package", checkout: null }),
+		now: () => 2_000_000
+	});
+	try {
+		const state = await updater.checkNow(true);
+		assert.equal(state.status, "error");
+		assert.match(state.message, /release check failed from all sources/);
+		assert.match(state.message, /npm registry check 500/);
+		assert.match(state.message, /GitHub release check 500/);
+		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "old index");
+	} finally {
+		updater.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("a local write failure stops the source chain instead of retrying", { skip: process.platform === "win32" }, async () => {
+	const dir = packageDir();
+	const tarball = releaseTarball("0.3.0");
+	const downloads = [];
+	const updater = startAutoUpdate({
+		packageDir: dir,
+		profileDir: "/tmp/profile",
+		packageName: "dsh-multi-provider-usage",
+		currentVersion: "0.2.5",
+		getConfig: () => ({ autoUpdate: true, autoUpdateCheckHours: 6 }),
+		fetchImpl: async (url) => {
+			const u = String(url);
+			if (u === LATEST.npm) return npmManifest("0.3.0", "https://example.test/npm.tgz");
+			if (u === LATEST.mirror || u === LATEST.github) return { ok: false, status: 500, text: async () => "" };
+			downloads.push(u);
+			return { ok: true, arrayBuffer: async () => tarball };
+		},
+		execImpl: async () => { throw new Error("must not run git"); },
+		timers,
+		detect: () => ({ kind: "package", checkout: null }),
+		now: () => 2_000_000
+	});
+	try {
+		chmodSync(dir, 0o555);
+		const state = await updater.checkNow(true);
+		assert.equal(state.status, "available");
+		assert.match(state.message, /EACCES|EPERM/);
+		assert.match(state.message, /not writable/, "the message carries a permission hint");
+		assert.equal(downloads.length, 1, "no other download source is tried for a local failure");
+		assert.equal(readFileSync(join(dir, "lib", "index.js"), "utf8"), "old index");
+	} finally {
+		chmodSync(dir, 0o755);
+		updater.dispose();
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
