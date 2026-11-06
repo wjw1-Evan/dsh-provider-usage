@@ -79,6 +79,12 @@ test("GLM bases and quota URLs accept a bare host or an /api base", () => {
 	assert.equal(providers.glmQuotaUrl("https://api.z.ai/api/"), "https://api.z.ai/api/monitor/usage/quota/limit");
 });
 
+test("GLM base kinds tell the international and China versions apart", () => {
+	assert.equal(providers.glmBaseKind("https://api.z.ai"), "zai");
+	assert.equal(providers.glmBaseKind("https://open.bigmodel.cn/"), "bigmodel");
+	assert.equal(providers.glmBaseKind("https://glm.example.test"), "custom");
+});
+
 test("readCommandCode derives the monthly, 5-hour and weekly windows", async () => {
 	installWire({ commandCode: commandCodeFixture() });
 	const result = await providers.readCommandCode({
@@ -162,6 +168,7 @@ test("readGlm falls back from z.ai to bigmodel in auto mode and sends the raw to
 	assert.deepEqual(result.windows.map((window) => window.key), ["five-hour", "weekly", "mcp"]);
 	assert.match(result.source, /^credential:/);
 	assert.equal(result.meta.region, "https://open.bigmodel.cn");
+	assert.equal(result.meta.regionKind, "bigmodel", "the answered version travels with the payload");
 	const request = wire.requests.find((entry) => entry.url.includes("open.bigmodel.cn"));
 	assert.equal(request.headers.get("authorization"), "sk-glm", "GLM expects the raw token, not a Bearer scheme");
 });
@@ -185,6 +192,38 @@ test("readGlm surfaces an account-level failure when every region rejects it", a
 			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" })
 		}),
 		(error) => error.code === "api-error" && /no plan/.test(error.message)
+	);
+});
+
+test("readGlm names both GLM versions when neither has a Coding Plan", async () => {
+	const msg = "当前用户不存在coding plan";
+	installWire({ glm: { zai: { success: false, msg }, bigmodel: { success: false, msg } } });
+	await assert.rejects(
+		providers.readGlm({
+			config: { apiKeyEnv: "ZAI_API_KEY", region: "auto", locale: "zh" },
+			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" })
+		}),
+		(error) => {
+			assert.equal(error.code, "api-error");
+			assert.match(error.message, /国际版和国内版都返回/);
+			assert.match(error.message, new RegExp(msg));
+			assert.equal(error.meta.attempts.length, 2, "each probed version is recorded");
+			assert.deepEqual(error.meta.attempts.map((attempt) => attempt.kind), ["zai", "bigmodel"]);
+			return true;
+		}
+	);
+});
+
+test("readGlm lists each version's own answer in English when they differ", async () => {
+	installWire({ glm: { zai: { success: false, msg: "invalid token" }, bigmodel: { success: false, msg: "no plan" } } });
+	await assert.rejects(
+		providers.readGlm({
+			config: { apiKeyEnv: "ZAI_API_KEY", region: "auto", locale: "en" },
+			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" })
+		}),
+		(error) => /international \(api\.z\.ai\): invalid token/.test(error.message)
+			&& /China \(open\.bigmodel\.cn\): no plan/.test(error.message)
+			&& /GLM Code Plan: international/.test(error.message)
 	);
 });
 

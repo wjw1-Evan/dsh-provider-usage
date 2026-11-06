@@ -28,8 +28,14 @@ panel settings page — extended from one provider to three.
 - **Command Code** — monthly credit pool, 5-hour window and weekly window from
   the official billing/usage endpoints (`/alpha/billing/*`,
   `/alpha/usage/summary`).
-- **GLM Code Plan** — 5-hour token window, weekly token window and monthly MCP
-  tool limit from Z.ai / BigModel `/api/monitor/usage/quota/limit`.
+- **GLM Code Plan, international and China** — 5-hour token window, weekly
+  token window and monthly MCP tool limit, read from the international Z.ai
+  host (`api.z.ai`) or the China BigModel host (`open.bigmodel.cn`) at
+  `/api/monitor/usage/quota/limit`. `auto` probes both, the GLM card badges the
+  version that answered (**International** / **China**), and the plugin
+  settings can pin one version (or a custom endpoint). When neither version
+  answers, the failure names each version's result instead of only the last
+  probe.
 - **Top-up balances** — OpenCode GO shows the OpenCode Zen prepaid balance and
   Command Code shows its purchased + free "Extra Credits" balance, both as a
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
@@ -274,7 +280,8 @@ the settings page and the auto-generated form hot-apply.
 | `providerOrder` | all three ids | Provider display order in the widget; drag the cards in the plugin settings to reorder |
 
 `glmRegion: "custom"` requires `glmBaseUrl`; `auto` probes
-`https://api.z.ai` first and then `https://open.bigmodel.cn`.
+`https://api.z.ai` first and then `https://open.bigmodel.cn`, and the widget
+badges the version that answered.
 
 ## HTTP API
 
@@ -422,7 +429,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 103 tests, all offline.
+isolation, and the session-header injection. 110 tests, all offline.
 
 ## License
 

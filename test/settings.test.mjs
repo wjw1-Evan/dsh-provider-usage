@@ -64,6 +64,7 @@ test("GET settings returns the descriptor value, revision and detection", async 
 	assert.equal(detection["command-code"].credentialRef, "COMMANDCODE_API_KEY");
 	assert.equal(detection.glm.configured, true);
 	assert.equal(detection.glm.credentialRef, "ZAI_API_KEY");
+	assert.equal(detection.glm.region, "auto", "the GLM version mode is reported");
 });
 
 test("GET settings reports the OpenCode console balance source", async () => {
@@ -199,6 +200,28 @@ test("POST settings accepts the console balance fields", async () => {
 		opencodeConsoleDbFile: "/tmp/opencode.db",
 		opencodeConsoleBaseUrl: "https://console.example"
 	});
+});
+
+test("POST settings accepts the GLM Code Plan version", async () => {
+	const config = { ...DEFAULTS, cacheMs: 0, updateCheck: false, commandCodeAuthFile: "/nonexistent/commandcode-auth.json" };
+	const settings = makeSettings({
+		value: DEFAULTS,
+		revision: 2,
+		onUpdate: (patch, next) => {
+			Object.assign(config, next);
+		}
+	});
+	const { routes } = boot({ settings, config });
+	const res = await callRoute(routes, "/provider-usage/settings", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ patch: { glmRegion: "zai" }, expectedRevision: 2 })
+	});
+
+	assert.equal(res.status, 200);
+	assert.deepEqual(settings.updates[0].patch, { glmRegion: "zai" });
+	assert.equal(res.body.detection.providers.glm.region, "zai");
+	assert.equal(res.body.detection.providers.glm.baseUrl, "https://api.z.ai");
 });
 
 test("POST settings rejects an empty or invalid patch", async () => {

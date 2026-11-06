@@ -24,8 +24,12 @@
   `GET /v1/usage`。
 - **Command Code** — 月度额度池、5 小时窗口、周窗口，数据来自官方
   `/alpha/billing/*` 与 `/alpha/usage/summary`。
-- **GLM Code Plan** — 5 小时 Token 窗口、周 Token 窗口、月度 MCP 工具额度，数据
-  来自 Z.ai / BigModel 的 `/api/monitor/usage/quota/limit`。
+- **GLM Code Plan（国际版 / 国内版）** — 5 小时 Token 窗口、周 Token 窗口、
+  月度 MCP 工具额度，国际版读 `api.z.ai`、国内版读 `open.bigmodel.cn` 的
+  `/api/monitor/usage/quota/limit`。默认 `auto` 两个版本都探测，组件在账号旁用
+  「国际版 / 国内版」小标签标出实际生效的版本；插件设置页可选择自动 / 国际版 /
+  国内版 / 自定义接口。两个版本都失败时，错误信息分别列出各自的返回，而不是只报
+  最后一次探测。
 - **订阅外充值余额** — OpenCode GO 显示 OpenCode Zen 预付费余额，Command Code 显示
   购买额度 + 免费额度的 “Extra Credits” 余额；两者都显示在账号/套餐旁，并出现在
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
@@ -231,7 +235,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `providerOrder` | 三个 id 全集 | 组件中的显示顺序；在插件设置里拖动卡片调整 |
 
 `glmRegion: "custom"` 必须提供 `glmBaseUrl`；`auto` 先探测
-`https://api.z.ai`，再探测 `https://open.bigmodel.cn`。
+`https://api.z.ai`，再探测 `https://open.bigmodel.cn`，组件会标出实际生效的版本。
 
 ## HTTP API
 
@@ -370,7 +374,7 @@ npm test
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
 密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
 强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、余额变化动画；共 103 个测试。
+auth.json）与失败隔离、会话头注入、余额变化动画；共 110 个测试。
 
 ## 许可证
 

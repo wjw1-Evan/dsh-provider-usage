@@ -839,3 +839,137 @@ test("host and client agree on the routes and provider ids", async () => {
 	assert.ok(text.includes("plugins.bundle.config"), "client uses the official config slot");
 	assert.ok(text.includes("sidebar.footer.action"), "client uses the sidebar footer slot");
 });
+
+test("the GLM card names the Code Plan version that answered", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const render = (meta) => {
+		react.reset();
+		react.seed(0, {
+			providers: [{
+				id: "glm",
+				name: "GLM Code Plan",
+				status: "ok",
+				account: null,
+				plan: null,
+				fallback: null,
+				balance: null,
+				windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 12, status: "ok", resetsAt: null, windowMs: null }],
+				meta
+			}],
+			defaultProvider: "auto"
+		});
+		react.seed(1, null);
+		react.seed(2, 0);
+		react.seed(3, new Set());
+		react.seed(4, {});
+		const widget = exports.Widget({ wide: true, t: tt });
+		const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+		return JSON.stringify(providers.props.children[0]);
+	};
+
+	const international = render({ region: "https://api.z.ai", regionKind: "zai" });
+	assert.match(international, /"children":"region\.zai"/, "the international version is badged");
+	assert.match(international, /api\.z\.ai/, "the badge tooltip names the host");
+	const china = render({ region: "https://open.bigmodel.cn" });
+	assert.match(china, /"children":"region\.bigmodel"/, "older payloads derive the version from the base URL");
+	assert.doesNotMatch(render({ attempts: [] }), /region\.(zai|bigmodel|custom)/, "an unknown version shows no badge");
+});
+
+test("the GLM settings card offers the version choice and reports the detected one", () => {
+	const exports = loadExports();
+	const value = {
+		opencodeGoEnabled: true,
+		opencodeGoApiKeyEnv: "OPENCODE_GO_API_KEY",
+		commandCodeEnabled: true,
+		commandCodeApiKeyEnv: "COMMANDCODE_API_KEY",
+		glmEnabled: true,
+		glmApiKeyEnv: "ZAI_API_KEY",
+		glmRegion: "auto",
+		providerOrder: ["opencode-go", "command-code", "glm"]
+	};
+	react.reset();
+	react.seed(0, {
+		phase: "ready",
+		revision: 3,
+		value,
+		detection: { providers: { glm: { configured: true, credentialRef: "ZAI_API_KEY", region: "zai", baseUrl: "https://api.z.ai" } } },
+		error: null
+	});
+	react.seed(1, value);
+	react.seed(2, { save: false, reload: false });
+	react.seed(3, null);
+	react.seed(4, null);
+	react.seed(5, {
+		phase: "ready",
+		at: 0,
+		data: {
+			providers: [{
+				id: "glm",
+				name: "GLM Code Plan",
+				status: "ok",
+				balance: null,
+				windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 40, status: "ok", resetsAt: null, windowMs: null }],
+				meta: { region: "https://api.z.ai", regionKind: "zai" }
+			}]
+		},
+		error: null
+	});
+
+	const page = exports.SettingsPage({ t: (key) => key });
+	const tree = JSON.stringify(page);
+	assert.match(tree, /"key":"glm-region"/, "the GLM card carries the version selector");
+	for (const kind of ["auto", "zai", "bigmodel", "custom"]) {
+		assert.match(tree, new RegExp('"value":"' + kind + '"'), `the ${kind} option exists`);
+	}
+	assert.match(tree, /cfg\.status\.region: region\.zai/, "the status line reports the configured version");
+
+	// The live-usage inset is an element at this level; render it directly to
+	// check that it names the version the numbers came from.
+	const glmProvider = {
+		id: "glm",
+		name: "GLM Code Plan",
+		status: "ok",
+		balance: null,
+		windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 40, status: "ok", resetsAt: null, windowMs: null }],
+		meta: { region: "https://api.z.ai", regionKind: "zai" }
+	};
+	const usageTree = JSON.stringify(exports.UsageSection({ t: (key) => key, enabled: true, provider: glmProvider, phase: "ready" }));
+	assert.match(usageTree, /"children":"region\.zai"/, "live usage names the version that answered");
+	assert.match(usageTree, /https:\/\/api\.z\.ai/, "the live usage row carries the host");
+
+	const select = findType(page, "select")[0];
+	assert.equal(select.props.value, "auto");
+	select.props.onChange({ target: { value: "bigmodel" } });
+	assert.equal(react.peek(1).glmRegion, "bigmodel", "choosing a version updates the form");
+});
+
+test("both locales name the two GLM Code Plan versions", () => {
+	const locales = [];
+	loadExports().apply({
+		effect: (fn) => fn(),
+		locale: { register: (_ns, tables) => { locales.push(tables); return () => {}; } },
+		slots: { inject: (_name, callback) => { callback(); }, register: () => () => {} }
+	});
+	const tables = locales[0];
+	for (const key of [
+		"region.auto",
+		"region.zai",
+		"region.bigmodel",
+		"region.custom",
+		"widget.region.title",
+		"cfg.glm.region",
+		"cfg.glm.region.auto",
+		"cfg.glm.region.zai",
+		"cfg.glm.region.bigmodel",
+		"cfg.glm.region.custom",
+		"cfg.status.region"
+	]) {
+		assert.ok(tables.zh[key], `zh ${key} exists`);
+		assert.ok(tables.en[key], `en ${key} exists`);
+	}
+	assert.equal(tables.zh["region.zai"], "国际版");
+	assert.equal(tables.zh["region.bigmodel"], "国内版");
+	assert.equal(tables.en["region.zai"], "International");
+	assert.equal(tables.en["region.bigmodel"], "China");
+});
