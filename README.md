@@ -85,7 +85,10 @@ panel settings page — extended from one provider to three.
 - **`/provider-usage` chat command** — prints every enabled provider's numbers
   as text.
 - **Time bars** — under each quota bar, gray is time already elapsed and blue is
-  time remaining, matching the reference widget's geometry.
+  time remaining, matching the reference widget's geometry. Each window also
+  counts down to its reset on the right, and an exhausted window keeps that
+  countdown — the exceeded state moves into the hover title instead of
+  replacing the time.
 - **`x-opencode-session` fix** — injects the real per-conversation harness
   session id into OpenCode GO chat requests at runtime, without patching DSH.
 - **Chinese and English UI** through the DSH locale service.

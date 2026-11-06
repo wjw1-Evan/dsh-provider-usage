@@ -680,6 +680,54 @@ test("a low balance renders amber and a critical balance renders red", () => {
 	assert.doesNotMatch(low, /dpu-critical/, "amber does not leak into red");
 });
 
+test("an exhausted window keeps its countdown, with the status in the hover title", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	// 3 days, 2 hours and 5 minutes out, so the countdown lands on 3d2h even
+	// with the milliseconds the render consumes.
+	const resetsAt = new Date(Date.now() + ((3 * 24 + 2) * 3600 + 5 * 60) * 1000).toISOString();
+	const data = {
+		providers: [{
+			id: "command-code",
+			name: "Command Code",
+			status: "ok",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [
+				{ key: "weekly", labelKey: "window.weekly", percent: 100, status: "exceeded", resetsAt, windowMs: 7 * 864e5 },
+				{ key: "monthly", labelKey: "window.monthly", percent: 52.3, status: "ok", resetsAt: null, windowMs: null },
+				{ key: "five-hour", labelKey: "window.five-hour", percent: 100, status: "exceeded", resetsAt: null, windowMs: null, hintKey: "window.five-hour.hint" }
+			],
+			meta: {}
+		}],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: tt });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	// div.dpu-provider → body → Fragment → one .dpu-row per window.
+	const rows = providers.props.children[0].props.children[1].props.children[0].props.children;
+
+	const weekly = rows[0].props.children[1].props.children[1];
+	assert.equal(weekly.props.children, 'time.days:{"n":3,"m":2}', "an exhausted window still counts down");
+	assert.match(weekly.props.title, /time\.resetsAt/, "the tooltip carries the absolute reset time");
+	assert.match(weekly.props.title, /exceeded/, "the exhausted state is still named in the tooltip");
+
+	const monthly = rows[1].props.children[1].props.children[1];
+	assert.equal(monthly.props.children, "", "a window without a reset time and without a hint stays empty");
+
+	const noReset = rows[2].props.children[1].props.children[1];
+	assert.equal(noReset.props.children, "exceeded", "without a reset time the status label fills the slot");
+});
+
 test("an error line is a keyboard-reachable retry control", () => {
 	const exports = loadExports();
 	const data = {
