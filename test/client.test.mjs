@@ -680,7 +680,7 @@ test("a low balance renders amber and a critical balance renders red", () => {
 	assert.doesNotMatch(low, /dpu-critical/, "amber does not leak into red");
 });
 
-test("an exhausted window keeps its countdown, with the status in the hover title", () => {
+test("an exhausted window keeps its countdown and labels the status after the percentage", () => {
 	const exports = loadExports();
 	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
 	// 3 days, 2 hours and 5 minutes out, so the countdown lands on 3d2h even
@@ -721,8 +721,15 @@ test("an exhausted window keeps its countdown, with the status in the hover titl
 	assert.match(weekly.props.title, /time\.resetsAt/, "the tooltip carries the absolute reset time");
 	assert.match(weekly.props.title, /exceeded/, "the exhausted state is still named in the tooltip");
 
+	const weeklyValue = rows[0].props.children[0].props.children[1];
+	assert.equal(weeklyValue.props.children[0].props.children, "100%", "the percentage is still shown");
+	const chip = weeklyValue.props.children[1];
+	assert.equal(chip.props.children, "exceeded", "the status sits right after the percentage");
+	assert.equal(chip.props.className, "dpu-window-status dpu-status-exceeded", "an exhausted window reads as an error chip");
+
 	const monthly = rows[1].props.children[1].props.children[1];
 	assert.equal(monthly.props.children, "", "a window without a reset time and without a hint stays empty");
+	assert.equal(rows[1].props.children[0].props.children[1].props.children[1], null, "a healthy window carries no status chip");
 
 	const noReset = rows[2].props.children[1].props.children[1];
 	assert.equal(noReset.props.children, "exceeded", "without a reset time the status label fills the slot");

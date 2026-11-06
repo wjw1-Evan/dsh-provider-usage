@@ -86,9 +86,9 @@ panel settings page — extended from one provider to three.
   as text.
 - **Time bars** — under each quota bar, gray is time already elapsed and blue is
   time remaining, matching the reference widget's geometry. Each window also
-  counts down to its reset on the right, and an exhausted window keeps that
-  countdown — the exceeded state moves into the hover title instead of
-  replacing the time.
+  counts down to its reset on the right; an exhausted window keeps that
+  countdown and gains a small **exceeded**/**rate-limited** chip right after the
+  percentage, whose hover title also carries the absolute reset time.
 - **`x-opencode-session` fix** — injects the real per-conversation harness
   session id into OpenCode GO chat requests at runtime, without patching DSH.
 - **Chinese and English UI** through the DSH locale service.
@@ -422,7 +422,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 102 tests, all offline.
+isolation, and the session-header injection. 103 tests, all offline.
 
 ## License
 
