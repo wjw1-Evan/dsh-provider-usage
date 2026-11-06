@@ -11,9 +11,9 @@
 > `dsh-multi-provider-usage`。HTTP 路由（`/provider-usage/*`）和聊天命令
 > （`/provider-usage`）仍保持简短。
 
-## 功能
-
 ![侧边栏组件:三个服务商堆叠显示](docs/widget.png)
+
+## 功能
 
 
 - **一个组件，一列显示三个服务商。** 所有启用的服务商纵向排列；每家标题带健康

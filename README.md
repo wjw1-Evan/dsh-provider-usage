@@ -12,9 +12,9 @@ panel settings page — extended from one provider to three.
 > HTTP routes (`/provider-usage/*`) and chat command (`/provider-usage`) stay
 > short and stable.
 
-## Features
-
 ![Sidebar widget with the three stacked providers](docs/widget.png)
+
+## Features
 
 
 - **Three providers, one column.** All enabled providers are stacked vertically;
