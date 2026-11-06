@@ -1,12 +1,12 @@
 {
   "name": "dsh-multi-provider-usage",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "DSH (DeepSeek Harness) plugin: one collapsible sidebar widget for OpenCode GO, Command Code and GLM Code Plan quotas plus top-up balances, a periodic balance-change animation, automatic checkout and installed-package updates, same-origin usage proxies, a Plugins-panel settings page and a /provider-usage chat command (DSH 0.1.7+ and 0.2.0 compatible)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    "./client": "./lib/client.min.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -15,6 +15,8 @@
     "docs"
   ],
   "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "prepublishOnly": "npm run build:client",
     "test": "node test/run.mjs"
   },
   "keywords": [
@@ -37,11 +39,12 @@
     "node": ">=18"
   },
   "peerDependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4",
-    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.2.0-0 || >=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0"
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.2.0-0 || >=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "devDependencies": {
-    "@deepseek-ai/schemastery": "^3.18.5"
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "esbuild": "^0.28.2"
   },
   "license": "MIT",
   "dsh": {

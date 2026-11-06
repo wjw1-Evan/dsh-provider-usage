@@ -345,6 +345,19 @@ purchased/free pools. `meta.errors` lists partial Command Code endpoint
 failures: the numbers stay, the health dot turns amber, and the tooltip names
 the failed calls. Error cards keep the plan they already resolved.
 
+**Caching and refresh semantics (since 0.8.1)**: the host keeps a TTL cache per
+provider (`cacheMs`, default 30 s). Once a provider's entry has expired, the
+next request **answers instantly with the last-known value** (top-level and
+per-provider `servedStale: true`) while a background read refreshes upstream —
+a slow provider (up to its 15 s fetch timeout) can no longer stall the sidebar
+widget or the `/provider-usage` command; the widget follows up automatically a
+few seconds later. `?refresh=1` still blocks on a fresh read (manual refresh
+and post-save behavior are unchanged); an account/source switch never serves
+the previous account's data. Responses carry an `ETag`; a request with
+`If-None-Match` gets `304` with no body while the document is unchanged. The
+sidebar widget stretches its poll gap while nothing changes (from 30 s up to
+2 min).
+
 ### `GET /provider-usage/settings`
 
 Returns the settings descriptor (`namespace`, `revision`, `value`, `base`,

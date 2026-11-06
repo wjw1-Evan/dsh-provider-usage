@@ -297,6 +297,15 @@ Command Code 的 credits 响应没有购买/免费额度。`meta.errors` 列出 
 的部分接口失败：数字照常显示，但健康点变黄，悬停可看到失败的接口。错误卡片仍
 保留已经解析出的套餐信息。
 
+**缓存与刷新语义（0.8.1 起）**：宿主为每家服务商维护 TTL 缓存（`cacheMs`，默认
+30 s）。缓存过期后，下一次请求**立即返回上一次的结果**（顶层与对应 provider 带
+`servedStale: true` 标记），同时在后台重新读取上游——慢供应商（最长 15 s 超时）
+不再阻塞侧栏 Widget 和 `/provider-usage` 命令；Widget 收到 `servedStale` 后数秒
+内自动跟进新数据。`?refresh=1` 仍是阻塞式新读（手动刷新与保存设置后的行为不
+变）；账号/来源切换不会拿到旧账号的数据。响应带 `ETag`，携带 `If-None-Match`
+的请求在文档未变化时得到 `304`（无响应体）；侧栏 Widget 在数据无变化时自动拉
+长轮询间隔（30 s 起步，最长 2 min）。
+
 ### `GET /provider-usage/settings`
 
 返回设置描述符（`namespace`、`revision`、`value`、`base`、`user`）以及无网络请求的
