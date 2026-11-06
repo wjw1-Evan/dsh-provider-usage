@@ -172,15 +172,11 @@ When the balance is not configured (or the console login is fixable), the
 OpenCode GO card in the plugin settings renders a step-by-step **setup guide**
 in place of the static hint. The lead-in names the state-specific fix (nothing
 configured, an API-key login, or an expired sign-in). Step ① shows the
-`opencode auth login` CLI command with a **Copy command** button; step ② is the
-manual path — copy the console token and store it as the `OPENCODE_CONSOLE_TOKEN`
-credential — with a **Copy credential ref** button and a link to the OpenCode
-console website (derived from `opencodeConsoleBaseUrl`, ending in `/console`);
-step ③ offers a **Re-check** button that re-reads the sign-in state and forces
-one upstream usage read, so a fresh login shows the balance without restarting
-DSH (unsaved form edits are never discarded by the re-check). The
-`/provider-usage` command gives the same state-specific guidance as text for
-all three fixable states.
+`opencode auth login` CLI command with a **Copy command** button; step ② offers
+a **Re-check** button that re-reads the sign-in state and forces one upstream
+usage read, so a fresh login shows the balance without restarting DSH (unsaved
+form edits are never discarded by the re-check). The `/provider-usage` command
+gives the same state-specific guidance as text for all three fixable states.
 
 The optional `opencodeConsoleAuthFile` overrides the auth file (and its
 directory is used to locate `opencode.db`), `opencodeConsoleOrgId` supplies the
@@ -423,7 +419,7 @@ network and no real keys. They cover the schema, all three adapters, OpenCode
 GO service integration/fallback, aggregation and error isolation, caching and
 forced refresh, settings conflicts/whitelisting, the client bundle contract,
 top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 98 tests, all offline.
+isolation, and the session-header injection. 102 tests, all offline.
 
 ## License
 

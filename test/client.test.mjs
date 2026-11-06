@@ -487,26 +487,21 @@ test("the settings page explains how to enable the balance when it is missing", 
 	assert.equal(guide({ configured: true, source: "opencode-db", reason: "expired" })[0]?.props.reason, "expired", "an expired sign-in names the fix");
 	// The guide is wired to the page's re-check flow.
 	assert.equal(typeof guide({ configured: false, source: null })[0]?.props.onRecheck, "function");
-	assert.equal(guide({ configured: false, source: null })[0]?.props.credentialRef, "OPENCODE_CONSOLE_TOKEN");
-	assert.equal(guide({ configured: false, source: null })[0]?.props.consoleUrl, "https://opencode.ai/console");
 });
 
-test("the console guide carries the state-specific fix, copy actions and the console link", () => {
+test("the console guide carries the state-specific fix and copy actions", () => {
 	const exports = loadExports();
 	const t = (key) => key;
 	const render = (props) => {
 		react.reset();
-		return JSON.stringify(exports.ConsoleGuide({ t, consoleUrl: "https://opencode.ai/console", ...props }));
+		return JSON.stringify(exports.ConsoleGuide({ t, ...props }));
 	};
 	const generic = render({ reason: "", onRecheck: async () => {} });
 	assert.match(generic, /cfg\.console\.guide\.title/);
 	assert.match(generic, /cfg\.console\.hint/, "the generic lead-in for an unconfigured balance");
 	assert.match(generic, /opencode auth login/, "the CLI sign-in command is shown");
-	assert.match(generic, /OPENCODE_CONSOLE_TOKEN/, "the manual credential ref is shown");
 	assert.match(generic, /cfg\.console\.copy\.command/, "the command has a copy button");
-	assert.match(generic, /cfg\.console\.copy\.ref/, "the ref has a copy button");
 	assert.match(generic, /cfg\.console\.recheck/, "the guide offers re-check");
-	assert.match(generic, /https:\/\/opencode\.ai\/console/, "the console website link is rendered");
 
 	// A specific reason replaces the generic hint instead of stacking on it.
 	assert.match(render({ reason: "api-key", onRecheck: async () => {} }), /cfg\.console\.apiKey/);
@@ -525,7 +520,7 @@ test("the console guide carries the state-specific fix, copy actions and the con
 		locale: { register: (ns, tables) => { locales.push({ ns, tables }); return () => {}; } },
 		slots: { inject: (_name, callback) => { callback(); }, register: () => () => {} }
 	});
-	for (const key of ["cfg.console.guide.title", "cfg.console.guide.step1", "cfg.console.guide.step2", "cfg.console.guide.step3", "cfg.console.guide.link", "cfg.console.copy.command", "cfg.console.copy.ref", "cfg.console.recheck", "cfg.console.rechecking", "cfg.console.copied", "cfg.console.copyFailed"]) {
+	for (const key of ["cfg.console.guide.title", "cfg.console.guide.step1", "cfg.console.guide.step2", "cfg.console.copy.command", "cfg.console.recheck", "cfg.console.rechecking", "cfg.console.copied", "cfg.console.copyFailed"]) {
 		assert.ok(locales[0].tables.zh[key], `zh ${key} exists`);
 		assert.ok(locales[0].tables.en[key], `en ${key} exists`);
 	}
