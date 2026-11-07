@@ -243,6 +243,15 @@ their sum is the visible top-up balance (`balance.extra`). The
 5-hour/weekly bars use `windowLimits.fiveHour` / `weekly` (`used`, `cap`,
 `resetAt`, `exceeded`).
 
+**Token usage on a window row (since 0.8.2)**: a window may carry `tokensUsed`,
+the vendor's absolute token count for that window, and the widget renders it as
+a full grouped number right after the window label. Only Command Code provides
+one today — its billing-period `summary.totalTokens` rides on the `monthly`
+window (falling back to `totalTokensIn + totalTokensOut` when the vendor omits
+the combined field). No vendor reports tokens for the 5-hour or weekly windows
+(Command Code's `windowLimits.used`/`cap` count credits, not tokens), so those
+rows show no token count.
+
 A GLM account without a Coding Plan answers HTTP 200 with
 `{ "success": false, "msg": ... }`; the adapter surfaces that message and the
 widget shows the provider in an error state.

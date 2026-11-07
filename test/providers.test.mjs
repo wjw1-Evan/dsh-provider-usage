@@ -99,6 +99,9 @@ test("readCommandCode derives the monthly, 5-hour and weekly windows", async () 
 	const monthly = result.windows.find((window) => window.key === "monthly");
 	assert.equal(Math.round(monthly.percent * 100) / 100, 51.86);
 	assert.equal(monthly.resetsAt, "2026-11-30T16:48:56.000Z");
+	assert.equal(monthly.tokensUsed, 1977073179, "the billing-period token count rides on the monthly window");
+	const fiveHour = result.windows.find((window) => window.key === "five-hour");
+	assert.equal("tokensUsed" in fiveHour, false, "no vendor reports 5h tokens; the field stays absent");
 	const weekly = result.windows.find((window) => window.key === "weekly");
 	assert.equal(weekly.percent, 100);
 	assert.equal(weekly.status, "exceeded");
@@ -108,6 +111,22 @@ test("readCommandCode derives the monthly, 5-hour and weekly windows", async () 
 	assert.equal(result.balance.amount, 7.444241674);
 	assert.equal(result.balance.currency, "USD");
 	assert.deepEqual(result.balance.details, { purchased: 7.444241674, free: 0 });
+});
+
+test("readCommandCode falls back to tokensIn + tokensOut when the summary omits totalTokens", async () => {
+	const fixture = commandCodeFixture();
+	installWire({
+		commandCode: {
+			...fixture,
+			summary: { ...fixture.summary, totalTokens: undefined, totalTokensIn: 1000, totalTokensOut: 2000 }
+		}
+	});
+	const result = await providers.readCommandCode({
+		config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+		resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+	});
+	const monthly = result.windows.find((body) => body.key === "monthly");
+	assert.equal(monthly.tokensUsed, 3000, "in + out fills in for a missing combined field");
 });
 
 test("readCommandCode fails loudly without a credential or auth file", async () => {

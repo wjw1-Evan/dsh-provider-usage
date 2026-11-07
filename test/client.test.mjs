@@ -735,6 +735,48 @@ test("an exhausted window keeps its countdown and labels the status after the pe
 	assert.equal(noReset.props.children, "exceeded", "without a reset time the status label fills the slot");
 });
 
+test("a window with tokensUsed shows the full token count after its label", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const data = {
+		providers: [{
+			id: "command-code",
+			name: "Command Code",
+			status: "ok",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [
+				{ key: "monthly", labelKey: "window.monthly", percent: 51.9, status: "ok", resetsAt: null, windowMs: null, tokensUsed: 1977073179 },
+				{ key: "weekly", labelKey: "window.weekly", percent: 100, status: "exceeded", resetsAt: null, windowMs: null }
+			],
+			meta: {}
+		}],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: tt });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const rows = providers.props.children[0].props.children[1].props.children[0].props.children;
+
+	const monthlyLabel = rows[0].props.children[0].props.children;
+	assert.equal(monthlyLabel[1].props.className, "dpu-row-tokens", "the token count sits between the label and the percentage");
+	assert.equal(monthlyLabel[1].props.children, "1,977,073,179", "the full grouped number renders");
+	assert.equal(monthlyLabel[1].props.title, "window.tokens.title: 1,977,073,179", "the tooltip names the metric");
+	assert.equal(monthlyLabel[2].props.className, "dpu-row-value", "the percentage slot follows the token count");
+
+	const weeklyLabel = rows[1].props.children[0].props.children;
+	assert.equal(weeklyLabel.length, 2, "a window without tokensUsed keeps the two-element label");
+	assert.equal(weeklyLabel[1].props.className, "dpu-row-value");
+});
+
 test("an error line is a keyboard-reachable retry control", () => {
 	const exports = loadExports();
 	const data = {
