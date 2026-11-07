@@ -64,6 +64,8 @@ test("GLM quota normalization maps 5-hour, weekly and MCP limits", () => {
 	assert.equal(windows[0].percent, 40.5);
 	assert.equal(windows[1].windowMs, 7 * 86400e3);
 	assert.equal(windows[2].labelKey, "window.mcp");
+	assert.equal(windows[2].used, 123, "the TIME_LIMIT used count rides on the mcp window");
+	assert.equal(windows[2].cap, 1000);
 	assert.equal(windows[0].resetsAt, new Date(1793371200000).toISOString());
 });
 

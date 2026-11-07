@@ -200,11 +200,20 @@ OpenCode 那样分叉：缺少 `COMMANDCODE_API_KEY` 且没有 `~/.commandcode/a
 `windowLimits.fiveHour` / `weekly`（`used`、`cap`、`resetAt`、`exceeded`）。
 
 **窗口行上的 token 用量（0.8.2 起）**：窗口对象可以携带 `tokensUsed`——供应商为该窗口
-报告的绝对 token 数——控件会在窗口名称后面以完整千分位数字显示。目前只有 Command Code
+报告的绝对 token 数——控件会在窗口名称后面以 `Token: <数字>` 显示,数字为带单位的
+紧凑格式(中文 万/亿,英文 K/M/B;低于最小单位时保留千分位)。目前只有 Command Code
 提供：账单周期 `summary.totalTokens` 挂在 `monthly` 窗口上（供应商省略合并字段时回退为
 `totalTokensIn + totalTokensOut`）。没有任何供应商为 5 小时/周窗口报告 token 数
 （Command Code 的 `windowLimits.used`/`cap` 计的是积分而非 token），因此这两行不显示
 token 数。
+
+**账单上下文(0.8.3 起)**:月窗口 token 数的 tooltip 携带账单周期输入/输出细分
+(`meta.totals.tokensIn` / `tokensOut`)与请求数/成功率(`meta.totals.requests` /
+`successRate`);预测耗尽日(`meta.projection.runsOutInDays`,Command Code)在月窗口行
+中直接跟在 token 数后面。**MCP 工具调用(0.8.3 起)**:GLM 的
+月度 `TIME_LIMIT` 计数以 `used`/`cap` 挂在 `mcp` 窗口上,在名称后显示为「123 / 1,000」。
+**充值链接(0.8.3 起)**:OpenCode 预付余额偏低且控制台标记可充值时,徽章直接链接到
+[opencode.ai/console](https://opencode.ai/console)。
 
 GLM 账号没有 Coding Plan 时，接口会返回 HTTP 200 +
 `{ "success": false, "msg": ... }`；适配器会显示该消息，组件把服务商标记为错误状态。

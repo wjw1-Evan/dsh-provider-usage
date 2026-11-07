@@ -735,7 +735,7 @@ test("an exhausted window keeps its countdown and labels the status after the pe
 	assert.equal(noReset.props.children, "exceeded", "without a reset time the status label fills the slot");
 });
 
-test("a window with tokensUsed shows the full token count after its label", () => {
+test("a window with tokensUsed shows its unit-suffixed count after the label", () => {
 	const exports = loadExports();
 	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
 	const data = {
@@ -768,13 +768,84 @@ test("a window with tokensUsed shows the full token count after its label", () =
 
 	const monthlyLabel = rows[0].props.children[0].props.children;
 	assert.equal(monthlyLabel[1].props.className, "dpu-row-tokens", "the token count sits between the label and the percentage");
-	assert.equal(monthlyLabel[1].props.children, "1,977,073,179", "the full grouped number renders");
-	assert.equal(monthlyLabel[1].props.title, "window.tokens.title: 1,977,073,179", "the tooltip names the metric");
+	assert.equal(monthlyLabel[1].props.children, "Token:2B", "the token count renders with a unit");
+	assert.equal(monthlyLabel[1].props.title, "window.tokens.title: 2B", "the tooltip names the metric");
 	assert.equal(monthlyLabel[2].props.className, "dpu-row-value", "the percentage slot follows the token count");
 
 	const weeklyLabel = rows[1].props.children[0].props.children;
 	assert.equal(weeklyLabel.length, 2, "a window without tokensUsed keeps the two-element label");
 	assert.equal(weeklyLabel[1].props.className, "dpu-row-value");
+});
+
+test("the monthly tooltip carries billing context and the mcp row shows its used/cap pair", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const data = {
+		providers: [
+			{
+				id: "command-code",
+				name: "Command Code",
+				status: "ok",
+				account: null,
+				plan: null,
+				fallback: null,
+				balance: null,
+				windows: [
+					{ key: "monthly", labelKey: "window.monthly", percent: 51.9, status: "ok", resetsAt: null, windowMs: null, tokensUsed: 1977073179 }
+				],
+				meta: {
+					projection: { runsOutInDays: 12.4 },
+					totals: { requests: 9918, successRate: 100, tokensIn: 1969606152, tokensOut: 7467027 }
+				}
+			},
+			{
+				id: "glm",
+				name: "GLM Code Plan",
+				status: "ok",
+				account: null,
+				plan: null,
+				fallback: null,
+				balance: null,
+				windows: [
+					{ key: "mcp", labelKey: "window.mcp", hintKey: "window.mcp.hint", percent: 12.3, status: "ok", resetsAt: null, windowMs: null, used: 123, cap: 1000 }
+				],
+				meta: {}
+			}
+		],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: tt });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const sections = providers.props.children;
+	const ccRows = sections[0].props.children[1].props.children[0].props.children;
+	const glmRows = sections[1].props.children[1].props.children[0].props.children;
+
+	const ccLabel = ccRows[0].props.children[0].props.children;
+	assert.equal(ccLabel[1].props.children, "Token:2B");
+	assert.equal(
+		ccLabel[1].props.title,
+		'window.tokens.title: 2B\nwindow.tokens.breakdown:{"in":"2B","out":"7.5M"}\nwindow.totals.text:{"requests":"9.9K","rate":"100"}',
+		"the token tooltip carries the in/out split and request totals"
+	);
+
+	assert.equal(ccLabel.length, 4, "the label holds the name, token count, projection and percentage");
+	assert.equal(ccLabel[1].props.className, "dpu-row-tokens dpu-inline", "the token count makes room for the projection");
+	assert.match(ccLabel[2].props.children, /^window\.projection\.short:\{"date":/, "the exhaustion date follows the token count");
+	assert.equal(ccLabel[3].props.className, "dpu-row-value", "the percentage still ends the label row");
+
+	const glmLabel = glmRows[0].props.children[0].props.children;
+	assert.equal(glmRows[0].props.children.length, 2, "rows without billing metadata stay two-element");
+	assert.equal(glmLabel.length, 3, "the mcp label gains one metric element");
+	assert.equal(glmLabel[1].props.className, "dpu-row-tokens", "the used/cap pair reuses the metric slot");
+	assert.equal(glmLabel[1].props.children, "123 / 1K");
+	assert.equal(glmLabel[1].props.title, "window.calls.title: 123 / 1K");
 });
 
 test("an error line is a keyboard-reachable retry control", () => {

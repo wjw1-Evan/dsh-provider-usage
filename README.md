@@ -245,12 +245,23 @@ their sum is the visible top-up balance (`balance.extra`). The
 
 **Token usage on a window row (since 0.8.2)**: a window may carry `tokensUsed`,
 the vendor's absolute token count for that window, and the widget renders it as
-a full grouped number right after the window label. Only Command Code provides
-one today — its billing-period `summary.totalTokens` rides on the `monthly`
+`Token: <number>` right after the window label, with a compact unit (亿/万 with
+a Chinese locale, B/M/K otherwise; full grouped digits below the smallest unit).
+Only Command Code provides one today — its billing-period `summary.totalTokens` rides on the `monthly`
 window (falling back to `totalTokensIn + totalTokensOut` when the vendor omits
 the combined field). No vendor reports tokens for the 5-hour or weekly windows
 (Command Code's `windowLimits.used`/`cap` count credits, not tokens), so those
 rows show no token count.
+
+**Billing context (since 0.8.3)**: the monthly token count's tooltip carries
+the billing-period in/out split (`meta.totals.tokensIn` / `tokensOut`) and the
+request totals with success rate (`meta.totals.requests` / `successRate`); the
+projected exhaustion date (`meta.projection.runsOutInDays`, Command Code)
+renders right after the token count in the monthly row's label. **MCP tool calls (since 0.8.3)**: GLM's monthly `TIME_LIMIT`
+counts ride on the `mcp` window as `used`/`cap` and render as "123 / 1,000"
+after its label. **Recharge link (since 0.8.3)**: a low OpenCode prepaid
+balance that the console marks purchasable links straight to
+[opencode.ai/console](https://opencode.ai/console) from the badge.
 
 A GLM account without a Coding Plan answers HTTP 200 with
 `{ "success": false, "msg": ... }`; the adapter surfaces that message and the
