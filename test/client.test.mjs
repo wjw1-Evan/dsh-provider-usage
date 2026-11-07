@@ -218,6 +218,44 @@ test("all providers render in one column and each header collapses independently
 	assert.match(JSON.stringify(ccHead), /GOAT/);
 });
 
+test("a tiny non-zero window renders a sliver and a <0.1% label", () => {
+	const exports = loadExports();
+	const data = {
+		providers: [{
+			id: "command-code",
+			name: "Command Code",
+			short: "CC",
+			status: "ok",
+			account: { name: "Evan", ref: "REF", id: null },
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [
+				{ key: "five-hour", labelKey: "window.five-hour", hintKey: "window.five-hour.hint", percent: 0.03, status: "ok", resetsAt: "2026-11-07T21:51:48.314Z", windowMs: 18000000 },
+				{ key: "weekly", labelKey: "window.weekly", percent: 0, status: "ok", resetsAt: "2026-11-14T16:51:48.314Z", windowMs: 604800000 },
+				{ key: "monthly", labelKey: "window.monthly", percent: 52.8, status: "ok", resetsAt: null, windowMs: null }
+			],
+			meta: {}
+		}],
+		defaultProvider: "auto",
+		providerOrder: ["command-code"]
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+	const tree = exports.Widget({ wide: true, t: (key) => key });
+	const json = JSON.stringify(tree);
+
+	// 0.03% used to render as "0%", which reads as "nothing consumed".
+	assert.equal((json.match(/<0\.1%/g) ?? []).length, 1, "a sub-0.05% window renders <0.1%, not 0%");
+	assert.match(json, /52\.8%/, "ordinary percentages keep one decimal");
+	assert.equal((json.match(/"minWidth":"2px"/g) ?? []).length, 2, "each non-zero fill keeps a visible sliver");
+	assert.match(json, /"width":"0%"/, "a 0% window still gets an empty track");
+});
+
 test("a missing console credential renders a clickable balance setup chip", () => {
 	const exports = loadExports();
 	const opened = [];

@@ -243,6 +243,19 @@ their sum is the visible top-up balance (`balance.extra`). The
 5-hour/weekly bars use `windowLimits.fiveHour` / `weekly` (`used`, `cap`,
 `resetAt`, `exceeded`).
 
+**Tiny usage (since 0.8.6)**: right after a 5-hour/weekly window resets, usage is
+often below 0.05%, which is under one pixel of bar width — the green fill
+disappeared entirely, making the card look like it had a single (blue time) bar
+or like usage was zero. Now:
+
+- a non-zero percentage that rounds to zero renders as `<0.1%` instead of `0%`;
+- any non-zero usage keeps at least a `2px` fill, so only a real `0%` is an empty bar;
+- the usage track keeps a 1px inset ring so it still reads as a bar on the light sidebar.
+
+Command Code's card therefore always shows two bars per row (green usage + blue
+time) for the 5-hour, weekly and monthly windows; a just-reset window only has a
+very thin green part, rather than a missing bar.
+
 **Token usage on a window row (since 0.8.2)**: a window may carry `tokensUsed`,
 the vendor's absolute token count for that window, and the widget renders it as
 `Token: <number>` right after the window label, with a compact unit (亿/万 with
