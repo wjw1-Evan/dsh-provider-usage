@@ -441,7 +441,7 @@ by the current `llm/stream` call. The base comes from
 
 ## Compatibility
 
-- DSH `0.1.7` and above, including the `0.2.0` line; verified on `0.2.1-rc.5`.
+- DSH `0.1.7` and above, with no upper bound (future DSH lines included); verified on `0.2.1-rc.5`.
 - `@deepseek-ai/schemastery` `^3.18.4` (volatile fields / settings page).
 - Node.js ≥ 18 (global `fetch`, `AbortSignal.timeout`).
 - `dsh-opencode-go` is optional; its absence is a normal fallback.

@@ -381,7 +381,7 @@ base 开头时才添加 `x-opencode-session`。base 来自
 
 ## 兼容性
 
-- DSH `0.1.7` 及以上，包括 `0.2.0` 系列；已在 `0.2.1-rc.5` 验证。
+- DSH `0.1.7` 及以上，不设上限（包含未来的 DSH 系列）；已在 `0.2.1-rc.5` 验证。
 - `@deepseek-ai/schemastery` `^3.18.4`（volatile 字段 / 设置页）。
 - Node.js ≥ 18（全局 `fetch`、`AbortSignal.timeout`）。
 - `dsh-opencode-go` 可选；未安装属于正常回退。
