@@ -67,12 +67,19 @@ panel settings page — extended from one provider to three.
   plans alike), in both the sidebar and the settings page's live-usage sections.
 - **Click-to-retry failures** — an error line in the widget is itself clickable
   (and keyboard-activatable) and forces one fresh upstream read.
+- **Network blips never wipe the card** — a refresh that fails only on the wire
+  (`fetch failed`, a timeout, HTTP `5xx`/`429`) answers with the last successful
+  read (`servedStale: true`) instead of an error, so the widget keeps its
+  numbers while the host retries in the background. Actionable failures — a
+  missing or rejected key, a vendor `{ success: false }` — still render their
+  error card and invalidate the remembered read.
 - **Same-origin proxy** — the browser only talks to `/provider-usage/usage` and
   `/provider-usage/settings`; API keys stay in the host process.
 - **Failure isolation** — one broken provider never hides the other two. The
   route answers `200` while any provider succeeds and `502` only when all
-  enabled providers fail. Partial endpoint failures keep the provider's numbers
-  but turn its health dot amber and name the failed calls in the tooltip.
+  enabled providers fail. Partial endpoint failures that need attention keep
+  the provider's numbers but turn its health dot amber and name the failed calls
+  in the tooltip; transient ones are suppressed (see above).
 - **Settings shortcut** — the widget header's **Settings** button opens this
   bundle's page in the sidebar **Plugins** panel, directly on the configuration
   page below.
@@ -193,7 +200,10 @@ directory is used to locate `opencode.db`), `opencodeConsoleOrgId` supplies the
 read off. Balance failures never hide the GO quota: the provider stays `ok` with
 `balance: null` and a `meta.balanceError` (plus `meta.balanceSetup` when the
 user can fix it). Any other balance failure renders a muted **Balance —** badge
-whose tooltip carries the error.
+whose tooltip carries the error. A balance call that only failed on the wire
+(`fetch failed`, a timeout, HTTP `5xx`/`429`) is not shown at all: it sets
+`meta.balanceTransient` and the host keeps the last known balance, so an
+auxiliary blip never blanks the slot or prints an error next to the quota.
 
 ### Command Code balance
 
@@ -204,12 +214,44 @@ or `~/.commandcode/auth.json`) fails the whole provider with an explicit
 are reported instead of hidden:
 
 - when `/alpha/billing/credits` fails, that request carries every window, so the
-  provider errors as well; its message now includes the underlying interface and
-  status instead of only "no usable quota windows", and `meta.balanceError` lets
-  the header show a muted **Balance —** badge carrying the cause;
+  provider errors as well unless a previous successful read can stand in (see
+  the stale fallback below); its message now includes the underlying interface
+  and status instead of only "no usable quota windows", and `meta.balanceError`
+  lets the header show a muted **Balance —** badge carrying the cause;
 - when the credits response succeeds but carries neither `purchasedCredits` nor
   `freeCredits`, `balance` stays `null` with `meta.balanceMissing: true` and the
   header shows a muted **No top-up** badge (a real `0` still renders `$0.00`).
+
+**Interface failures and billing period (since 0.8.7)**: Command Code reports
+rate-limit/permission failures as HTTP 200 with a `{ success: false }` envelope;
+those are now treated as errors and the envelope's reason reaches the message
+(previously the response was parsed as data and only
+`no usable quota windows` survived). When `/alpha/billing/subscriptions` fails,
+the billing period comes from the summary's own `periodStart` / `periodBasis`,
+and only period-scoped data feeds the monthly window.
+
+**Silent stale fallback (since 0.8.7)**: a refresh that fails only on the wire —
+`fetch failed`, a timeout, HTTP `5xx` or `429` — no longer replaces a provider
+with an error card. When the host already holds a successful read for the same
+account, it answers with that read (`servedStale: true`) and retries on the next
+refresh, so the sidebar keeps its last known numbers instead of
+`Command Code: Command Code /alpha/whoami: fetch failed; …`. The rule is
+provider-wide, not Command Code-only. A transient *partial* failure is left out
+of `meta.errors` as well, so the health dot and the tooltip stay quiet. Genuine
+failures are never hidden: a missing key, a `401`/`403`, a vendor
+`{ success: false }` envelope, or any provider with no successful read yet still
+renders its error card (and a real failure also invalidates the remembered
+read). The classification follows each vendor's own status code — a rejected
+OpenCode GO or GLM key is never mistaken for a blip even though those reads
+re-wrap the original error — and it applies to the auxiliary OpenCode console
+balance read too, where a wire failure keeps the previous balance instead of
+showing **Balance —**.
+
+**Defensive GLM parsing (since 0.8.7)**: `percentage` accepts numeric strings
+(common in the China deployment); a `TIME_LIMIT` without `percentage` derives it
+from `currentValue / usage`; duplicate limits of the same type are suffixed with
+`-2` but keep the base window's label, hint and time-bar length (instead of
+becoming an "Other window").
 
 ### OpenCode GO integration and fallback
 
@@ -236,11 +278,15 @@ path and never touches the other plugin.
 | GLM Code Plan | `five-hour`, `weekly`, `mcp` | 5 h, 7 d, monthly |
 
 Percentages are **used** percentages and are clamped to `[0, 100]` for display.
-Command Code monthly utilization is
-`totalCost / (totalCost + monthlyCredits)`; purchased and free credits are
-reported separately in `meta.monthly` and do not change the plan bar, while
-their sum is the visible top-up balance (`balance.extra`). The
-5-hour/weekly bars use `windowLimits.fiveHour` / `weekly` (`used`, `cap`,
+Command Code's monthly bar tracks the **plan credit pool only**:
+`summary.totalMonthlyCredits / plan total` (falling back to
+`planUsed + monthlyCredits` when the plan total is unknown).
+`summary.totalCost` also includes purchased and free credit spend
+(`totalCost = totalMonthlyCredits + totalPurchasedCredits + totalFreeCredits`),
+so it is no longer part of the plan bar — top-up credits only show up in
+`meta.monthly` (`used`, `purchased`, `free`, `extra`) and the top-up balance
+(`balance.extra`), and `meta.monthly.planUsed` carries the plan-scoped usage.
+The 5-hour/weekly bars use `windowLimits.fiveHour` / `weekly` (`used`, `cap`,
 `resetAt`, `exceeded`).
 
 **Tiny usage (since 0.8.6)**: right after a 5-hour/weekly window resets, usage is
@@ -322,6 +368,11 @@ badges the version that answered.
 
 `?refresh=1` (or `?force=1`) bypasses the host cache.
 
+A **200** with `providers: []` and `enabled: []` means every provider is
+disabled (a configuration state — the widget shows its localized hint); a
+**502** means providers exist but every one of them failed, and the body still
+carries each provider's error.
+
 ```json
 {
   "ok": true,
@@ -375,8 +426,10 @@ provider still answers `ok`); `meta.balanceSetup` (`no-credential`, `api-key` or
 `expired`) marks a failure the user can fix by signing in again;
 `meta.balanceMissing` marks a Command Code credits response without
 purchased/free pools. `meta.errors` lists partial Command Code endpoint
-failures: the numbers stay, the health dot turns amber, and the tooltip names
-the failed calls. Error cards keep the plan they already resolved.
+failures worth showing: the numbers stay, the health dot turns amber, and the
+tooltip names the failed calls (transient ones — timeout, `5xx`, `429` — are
+not listed; see the stale fallback above). Error cards keep the plan they
+already resolved.
 
 **Caching and refresh semantics (since 0.8.1)**: the host keeps a TTL cache per
 provider (`cacheMs`, default 30 s). Once a provider's entry has expired, the
@@ -386,10 +439,14 @@ a slow provider (up to its 15 s fetch timeout) can no longer stall the sidebar
 widget or the `/provider-usage` command; the widget follows up automatically a
 few seconds later. `?refresh=1` still blocks on a fresh read (manual refresh
 and post-save behavior are unchanged); an account/source switch never serves
-the previous account's data. Responses carry an `ETag`; a request with
-`If-None-Match` gets `304` with no body while the document is unchanged. The
-sidebar widget stretches its poll gap while nothing changes (from 30 s up to
-2 min).
+the previous account's data. A read that fails only on the wire answers with
+the last good value instead of an error (see the stale fallback above), and a
+failed background refresh never replaces a good document with an error one. A
+settings save drops the cached reads (so the next poll re-reads with the saved
+values) but keeps each provider's last good read as that fallback.
+Responses carry an `ETag`; a request with `If-None-Match` gets `304` with no
+body while the document is unchanged. The sidebar widget stretches its poll gap
+while nothing changes (from 30 s up to 2 min).
 
 ### `GET /provider-usage/settings`
 
@@ -472,10 +529,11 @@ npm test
 
 The tests are hermetic: a fake `globalThis.fetch` and a stub Cordis context, no
 network and no real keys. They cover the schema, all three adapters, OpenCode
-GO service integration/fallback, aggregation and error isolation, caching and
-forced refresh, settings conflicts/whitelisting, the client bundle contract,
-top-up balance discovery (credential and local auth.json) and failure
-isolation, and the session-header injection. 110 tests, all offline.
+GO service integration/fallback, aggregation and error isolation, caching,
+forced refresh, the transient-failure stale fallback and balance carry-over,
+settings conflicts/whitelisting, the client bundle contract, top-up balance
+discovery (credential and local auth.json) and failure isolation, and the
+session-header injection. 164 tests, all offline.
 
 ## License
 

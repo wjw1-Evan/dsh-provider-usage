@@ -55,7 +55,7 @@ test("GET usage returns all three providers in display order", async () => {
 	assert.equal(go.status, "ok");
 	assert.equal(go.windows.find((window) => window.key === "monthly").percent, 56);
 	assert.equal(cc.status, "ok");
-	assert.equal(Math.round(cc.windows.find((window) => window.key === "monthly").percent * 100) / 100, 51.86);
+	assert.equal(Math.round(cc.windows.find((window) => window.key === "monthly").percent * 100) / 100, 50.09);
 	assert.equal(glm.status, "ok");
 	assert.deepEqual(glm.windows.map((window) => window.key), ["five-hour", "weekly", "mcp"]);
 	// The 5-hour window uses the same label key for every provider, so the
@@ -105,15 +105,20 @@ test("a disabled provider is omitted entirely", async () => {
 	assert.deepEqual(res.body.providers.map((provider) => provider.id), ["opencode-go", "glm"]);
 });
 
-test("no enabled provider is a successful empty response, not a crash", async () => {
+test("no enabled provider is a successful empty response, not an error", async () => {
 	const { routes } = await bootWith({
 		config: { opencodeGoEnabled: false, commandCodeEnabled: false, glmEnabled: false }
 	});
 	const res = await callRoute(routes, "/provider-usage/usage");
-	assert.equal(res.status, 502);
+	// An all-disabled configuration is a state, not a failure: the widget
+	// renders its own localized empty hint for an empty provider list, and a
+	// string `error` here would make it show raw host text instead.
+	assert.equal(res.status, 200);
 	assert.deepEqual(res.body.providers, []);
+	assert.deepEqual(res.body.enabled, []);
 	assert.equal(res.body.ok, false);
-	assert.equal(res.body.error, "no providers enabled");
+	assert.equal(res.body.error, undefined);
+	assert.equal(typeof res.headers.etag, "string", "the empty state is negotiated like any other document");
 });
 
 test("the host cache collapses repeated polls and refresh=1 bypasses it", async () => {
@@ -220,7 +225,9 @@ test("the chat command reports missing and partial balances instead of omitting 
 	const noTopUpText = (await command(noTopUp).handler()).text;
 	assert.match(noTopUpText, /无充值额度/);
 
-	const partial = await bootWith({ wire: { commandCodeFail: "/alpha/whoami" } });
+	// A rejected call (4xx) is a real answer worth reporting; a transport blip
+	// is not (that path is covered by the stale-fallback tests).
+	const partial = await bootWith({ wire: { commandCodeFail: "/alpha/whoami", commandCodeFailStatus: 403 } });
 	const partialText = (await command(partial).handler()).text;
 	assert.match(partialText, /部分接口失败/);
 	assert.match(partialText, /whoami/);
@@ -277,4 +284,84 @@ test("a Command Code error card keeps the plan it already resolved", async () =>
 	assert.equal(cc.status, "error");
 	assert.equal(cc.plan.name, "GOAT", "the known plan is not thrown away with the failure");
 	assert.match(cc.error, /alpha\/billing\/credits 500/, "the error names the failing call");
+});
+
+test("the usage ETag ignores the volatile session-header diagnostics", async () => {
+	const session = await import("../lib/opencode-session.js");
+	const { routes } = await bootWith({ config: { cacheMs: 60_000 } });
+	const first = await callRoute(routes, "/provider-usage/usage");
+	assert.equal(first.status, 200);
+
+	// One llm/stream observation moves the diagnostics only; the quota document
+	// is unchanged, so the negotiated cache must still answer 304. A tag folded
+	// over the counters would re-download the document on every chat turn and
+	// reset the client's idle backoff each time.
+	session.recordStream({ provider: "opencode-go", hasSessionId: true, base: "https://opencode.ai/zen/go", baseFrom: "settings" });
+	const second = await callRoute(routes, "/provider-usage/usage", {
+		headers: { "if-none-match": first.headers.etag }
+	});
+	assert.equal(second.status, 304);
+	assert.equal(second.text, "");
+
+	// The response body itself still carries the diagnostics for the widget.
+	const full = await callRoute(routes, "/provider-usage/usage");
+	assert.equal(typeof full.body.sessionHeader.active, "boolean");
+	assert.equal(typeof full.body.sessionHeader.count, "number");
+	assert.equal(typeof full.body.sessionHeader.diag.streamSeen, "number");
+	assert.ok(full.body.sessionHeader.diag.streamSeen >= 1);
+});
+
+test("two unchanged quota polls answer 304 even though the derived estimates moved", async () => {
+	// `meta.projection.elapsedDays` / `runsOutInDays` are floats recomputed from
+	// Date.now() on every read, and Command Code always carries them. Folding
+	// them into the tag made every poll a new document, so the negotiated cache
+	// never answered 304 for that provider.
+	const { routes } = await bootWith({ config: { cacheMs: 0 } });
+	const first = await callRoute(routes, "/provider-usage/usage");
+	assert.equal(first.status, 200);
+	const second = await callRoute(routes, "/provider-usage/usage", {
+		headers: { "if-none-match": first.headers.etag }
+	});
+	assert.equal(second.status, 304, "the upstream quota document did not change");
+	assert.equal(second.text, "");
+});
+
+test("the chat command renders a sub-0.1% window like the widget", async () => {
+	const { glmFixture } = await import("./support/harness.mjs");
+	// A tiny but non-zero share used to print as "0%", which reads as "no usage
+	// at all"; the widget already renders "<0.1", so the command must too.
+	const tiny = glmFixture({
+		limits: [{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 0.04, nextResetTime: 1793371200000 }]
+	});
+	const { commands } = await bootWith({ wire: { glm: { zai: tiny, bigmodel: null } } });
+	const command = commands.find((candidate) => candidate.name === "provider-usage");
+	const text = (await command.handler()).text;
+	// Scope the check to the GLM card: Command Code's own 0% five-hour window is
+	// a genuine zero and must keep reading as "0%".
+	const glmSection = text.slice(text.indexOf("GLM Code Plan"));
+	assert.match(glmSection, /5 小时窗口: <0\.1%/);
+	assert.doesNotMatch(glmSection, /5 小时窗口: 0%/);
+});
+
+test("the chat command keeps a regional English locale fully English", async () => {
+	const localeEntry = {
+		id: "locale",
+		options: { id: "locale", name: "@deepseek-ai/dsh-client-locale" },
+		disabled: false,
+		fiber: { uid: 7, config: { preference: "en-US" } }
+	};
+	const { commands, routes } = await bootWith({
+		entries: [localeEntry],
+		wire: { registry: { version: "9.9.9" } },
+		config: { updateCheck: true }
+	});
+	// Prime the npm update state the command reports on.
+	await callRoute(routes, "/provider-usage/usage");
+	await new Promise((resolve) => { setTimeout(resolve, 20); });
+
+	const command = commands.find((candidate) => candidate.name === "provider-usage");
+	const text = (await command.handler()).text;
+	assert.match(text, /^Provider usage:/m);
+	assert.match(text, /Update available: v9\.9\.9/);
+	assert.doesNotMatch(text, /发现新版本/, "the update line follows the same locale rule as the report");
 });

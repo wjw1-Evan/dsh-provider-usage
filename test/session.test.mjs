@@ -106,3 +106,44 @@ test("the fetch wrapper keeps a Request object's own headers", async () => {
 test("the host registers the llm/stream listener when the fix is enabled", () => {
 	assert.equal(host.Config.dict.injectSessionHeader.meta.default, true);
 });
+
+test("a re-imported module generation still injects the session header", async () => {
+	// DSH's HMR clears the ESM cache and re-imports the plugin, which produces a
+	// second module instance for this file. The process-global marker would make
+	// that generation's `patchFetch()` a no-op, so the state it shares with the
+	// surviving wrapper (the AsyncLocalStorage and the counters) has to live on
+	// `globalThis` too — otherwise `withSession()` writes a store nobody reads.
+	const { pathToFileURL } = await import("node:url");
+	const { join } = await import("node:path");
+	const { REPO_ROOT } = await import("./support/harness.mjs");
+	const gen2 = await import(`${pathToFileURL(join(REPO_ROOT, "lib", "opencode-session.js")).href}?generation=2`);
+	assert.notEqual(gen2, session, "the second import is a distinct module instance");
+
+	const requests = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init) => {
+		requests.push({ url: String(input), headers: new Headers(init?.headers) });
+		return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+	};
+	delete globalThis[Symbol.for("dsh-multi-provider-usage:fetch-wrapped")];
+	session.patchFetch(); // generation 1 installed the wrapper
+	gen2.patchFetch(); // generation 2 activates after the reload: must stay a no-op
+
+	try {
+		const before = gen2.sessionHeaderCount();
+		async function* source() {
+			await fetch("https://opencode.ai/zen/go/v1/chat/completions", { method: "POST" });
+			yield 1;
+		}
+		for await (const _ of gen2.withSession(source(), { sessionId: "session-gen2", base: "https://opencode.ai/zen/go" })) {
+			// consume
+		}
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].headers.get("x-opencode-session"), "session-gen2", "the surviving wrapper reads the shared store");
+		assert.equal(gen2.sessionHeaderCount(), before + 1);
+		assert.equal(session.sessionHeaderCount(), gen2.sessionHeaderCount(), "both generations count into one shared state");
+	} finally {
+		globalThis.fetch = originalFetch;
+		delete globalThis[Symbol.for("dsh-multi-provider-usage:fetch-wrapped")];
+	}
+});

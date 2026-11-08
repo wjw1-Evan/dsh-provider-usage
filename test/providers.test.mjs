@@ -99,7 +99,13 @@ test("readCommandCode derives the monthly, 5-hour and weekly windows", async () 
 	assert.equal(result.plan.name, "GOAT");
 	assert.deepEqual(result.windows.map((window) => window.key), ["five-hour", "weekly", "monthly"]);
 	const monthly = result.windows.find((window) => window.key === "monthly");
-	assert.equal(Math.round(monthly.percent * 100) / 100, 51.86);
+	// 35.0602549663 plan credits of a 70-credit GOAT plan: purchased/free
+	// credits are excluded from the plan bar even though totalCost (37.616)
+	// includes them.
+	assert.equal(Math.round(monthly.percent * 100) / 100, 50.09);
+	assert.equal(result.meta.monthly.planUsed, 35.0602549663);
+	assert.equal(result.meta.monthly.cap, 70);
+	assert.equal(result.meta.monthly.used, 37.6160132923, "meta.used keeps the whole billing-period spend");
 	assert.equal(monthly.resetsAt, "2026-11-30T16:48:56.000Z");
 	assert.equal(monthly.tokensUsed, 1977073179, "the billing-period token count rides on the monthly window");
 	const fiveHour = result.windows.find((window) => window.key === "five-hour");
@@ -140,6 +146,297 @@ test("readCommandCode fails loudly without a credential or auth file", async () 
 		}),
 		(error) => error.code === "no-credential"
 	);
+});
+
+test("a Command Code 200 success:false envelope is reported as the vendor's error", async () => {
+	const fixture = commandCodeFixture();
+	installWire({
+		commandCode: {
+			...fixture,
+			credits: { success: false, error: { message: "rate limited, retry later" } }
+		}
+	});
+	await assert.rejects(
+		providers.readCommandCode({
+			config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+			resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+		}),
+		(error) => {
+			assert.equal(error.code, "invalid-response");
+			assert.match(error.message, /rate limited, retry later/, "the interface-level reason is not swallowed");
+			return true;
+		}
+	);
+});
+
+test("a failed subscription still scopes the month to the summary's own period", async () => {
+	installWire({ commandCodeFail: "/alpha/billing/subscriptions" });
+	const result = await providers.readCommandCode({
+		config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+		resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+	});
+	const monthly = result.windows.find((window) => window.key === "monthly");
+	// No plan id (the subscription is the only source), so the plan-scoped
+	// spend + remaining pair drives the bar: 35.0603 / (35.0603 + 34.9187).
+	assert.equal(Math.round(monthly.percent * 100) / 100, 50.1);
+	assert.equal(result.meta.monthly.planUsed, 35.0602549663);
+	assert.equal(result.meta.monthly.cap, 69.9789787867);
+});
+
+// ── transient vs actionable failures ───────────────────────────────────────
+// A network blip must not become an error card in the widget: the host serves
+// the last good read for transient failures. These tests pin the boundary.
+
+test("isTransientProviderError separates a transport hiccup from a setup failure", () => {
+	const transient = [
+		new providers.ProviderError("network-error", "Command Code /alpha/whoami: fetch failed"),
+		new providers.ProviderError("http-error", "Command Code /alpha/usage/summary 503: boom", { httpStatus: 503 }),
+		new providers.ProviderError("http-error", "Command Code 429: slow down", { httpStatus: 429 }),
+		new providers.ProviderError("http-error", "Command Code 408: timeout", { httpStatus: 408 }),
+		// The OpenCode console client reports the status as `status`.
+		{ name: "ConsoleError", code: "http-error", status: 503 },
+		new providers.ProviderError("read-failed", "the service did not answer in time", { transient: true })
+	];
+	for (const error of transient) {
+		assert.equal(providers.isTransientProviderError(error), true, error.message);
+	}
+	const actionable = [
+		new providers.ProviderError("no-credential", "Command Code: no API key"),
+		new providers.ProviderError("http-error", "Command Code 401: bad key", { httpStatus: 401 }),
+		new providers.ProviderError("http-error", "Command Code 403: forbidden", { httpStatus: 403 }),
+		new providers.ProviderError("invalid-response", "invalid usage payload"),
+		// No status means "could not classify": fail safe towards showing the
+		// error rather than hiding a rejected key behind stale numbers.
+		new providers.ProviderError("http-error", "wrapped without its status"),
+		new Error("boom"),
+		null
+	];
+	for (const error of actionable) {
+		assert.equal(providers.isTransientProviderError(error), false, String(error));
+	}
+});
+
+test("a Command Code read that only failed on the wire is marked transient", async () => {
+	installWire({ commandCodeFail: "/alpha/", commandCodeFailError: new Error("fetch failed") });
+	await assert.rejects(
+		providers.readCommandCode({
+			config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+			resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+		}),
+		(error) => {
+			assert.equal(error.code, "read-failed");
+			assert.equal(error.transient, true, "the host may fall back to the last good read");
+			assert.match(error.message, /fetch failed/);
+			return true;
+		}
+	);
+});
+
+test("a rejected Command Code key is not transient", async () => {
+	installWire({ commandCodeFail: "/alpha/", commandCodeFailStatus: 401 });
+	await assert.rejects(
+		providers.readCommandCode({
+			config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+			resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+		}),
+		(error) => {
+			assert.notEqual(error.transient, true, "a setup failure must reach the user");
+			assert.match(error.message, /401/);
+			return true;
+		}
+	);
+});
+
+test("a transient partial Command Code failure stays out of meta.errors", async () => {
+	// whoami failing on the wire leaves the quota windows intact: the read is
+	// still usable, so no amber dot, no "fetch failed" in the tooltip.
+	installWire({ commandCodeFail: "/alpha/whoami", commandCodeFailError: new Error("fetch failed") });
+	const result = await providers.readCommandCode({
+		config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+		resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+	});
+	assert.equal(result.status, "ok");
+	assert.ok(result.windows.length > 0);
+	assert.deepEqual(result.meta.errors, []);
+});
+
+test("a rejected partial Command Code call is still reported", async () => {
+	installWire({ commandCodeFail: "/alpha/whoami", commandCodeFailStatus: 403 });
+	const result = await providers.readCommandCode({
+		config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+		resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+	});
+	assert.equal(result.status, "ok");
+	assert.equal(result.meta.errors.length, 1);
+	assert.match(result.meta.errors[0], /alpha\/whoami/);
+});
+
+test("a revoked OpenCode GO key stays actionable (the wrapper keeps its status)", async () => {
+	installWire({ opencodeStatus: 401 });
+	await assert.rejects(
+		providers.readOpencodeGo({
+			config: { source: "builtin", apiKeyEnv: "OPENCODE_GO_API_KEY", baseUrl: "https://opencode.ai/zen/go" },
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		}),
+		(error) => {
+			assert.equal(error.code, "http-error");
+			assert.equal(error.httpStatus, 401, "opencodeGoFailure must not drop the vendor's status");
+			assert.notEqual(error.transient, true, "a revoked key must not hide behind stale numbers");
+			return true;
+		}
+	);
+});
+
+test("a rejected GLM probe is not transient, and a mixed read is only transient when every probe was", async () => {
+	// A single rejected probe: the setup is wrong, whatever the last answer was.
+	const unauthorized = async () => jsonResponse({ error: "unauthorized" }, 401);
+	await assert.rejects(
+		providers.readGlm({
+			config: { apiKeyEnv: "ZAI_API_KEY", region: "zai" },
+			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" }),
+			fetchImpl: unauthorized
+		}),
+		(error) => {
+			assert.equal(error.code, "http-error");
+			assert.notEqual(error.transient, true);
+			return true;
+		}
+	);
+
+	// Mixed: z.ai is offline, bigmodel rejects the token. The rejection wins
+	// regardless of probe order.
+	const mixed = async (url) => {
+		if (String(url).includes("z.ai")) throw new Error("fetch failed");
+		return jsonResponse({ error: "unauthorized" }, 401);
+	};
+	await assert.rejects(
+		providers.readGlm({
+			config: { apiKeyEnv: "ZAI_API_KEY", region: "auto" },
+			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" }),
+			fetchImpl: mixed
+		}),
+		(error) => {
+			assert.notEqual(error.transient, true, "one actionable probe keeps the whole read actionable");
+			return true;
+		}
+	);
+
+	// Every probe offline: transient, so the host may serve the last good read.
+	const offline = async () => { throw new Error("fetch failed"); };
+	await assert.rejects(
+		providers.readGlm({
+			config: { apiKeyEnv: "ZAI_API_KEY", region: "auto" },
+			resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" }),
+			fetchImpl: offline
+		}),
+		(error) => {
+			assert.equal(error.transient, true);
+			return true;
+		}
+	);
+});
+
+test("a balance request that only failed on the wire is not shown as an error", async () => {
+	installWire({ consoleError: new Error("fetch failed") });
+	const result = await providers.readOpencodeGo({
+		config: opencodeGoConfig({ apiKeyEnv: "OPENCODE_CONSOLE_TOKEN", authFile: "/nonexistent/auth.json", dbFile: "/nonexistent/opencode.db" }),
+		resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go", OPENCODE_CONSOLE_TOKEN: "sk-console" }),
+		entry: null
+	});
+
+	assert.equal(result.status, "ok");
+	assert.equal(result.balance, null);
+	assert.equal(result.meta.balanceError, undefined, "a wire failure is not an error to display");
+	assert.equal(result.meta.balanceTransient, true, "the host knows to keep the previous balance");
+	assert.equal(result.windows.find((window) => window.key === "monthly").percent, 56, "the quota is untouched");
+});
+
+test("a rejected console session still reports its setup state", async () => {
+	installWire({ console: null });
+	const result = await providers.readOpencodeGo({
+		config: opencodeGoConfig({ apiKeyEnv: "OPENCODE_CONSOLE_TOKEN", authFile: "/nonexistent/auth.json", dbFile: "/nonexistent/opencode.db" }),
+		resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go", OPENCODE_CONSOLE_TOKEN: "sk-console" }),
+		entry: null
+	});
+	assert.equal(result.balance, null);
+	assert.equal(result.meta.balanceSetup, "expired", "a 403 stays a fixable setup state");
+	assert.match(result.meta.balanceError, /403/);
+	assert.equal(result.meta.balanceTransient, undefined);
+});
+
+test("a credits response that is empty is not transient", async () => {
+	// The call answered, it just had nothing usable: an error card is right.
+	installWire({ commandCode: { ...commandCodeFixture(), credits: { credits: {} } } });
+	await assert.rejects(
+		providers.readCommandCode({
+			config: { apiKeyEnv: "COMMANDCODE_API_KEY" },
+			resolveCredential: resolver({ COMMANDCODE_API_KEY: "sk-cc" })
+		}),
+		(error) => {
+			assert.equal(error.code, "invalid-response");
+			assert.notEqual(error.transient, true);
+			return true;
+		}
+	);
+});
+
+test("GLM duplicate limits keep the base window labels and time bars", () => {
+	const windows = providers.normalizeGlmUsage({
+		limits: [
+			{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 10, nextResetTime: 1793371200000 },
+			{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 20, nextResetTime: 1793371200000 }
+		]
+	});
+	assert.deepEqual(windows.map((window) => window.key), ["five-hour", "five-hour-2"]);
+	assert.equal(windows[1].labelKey, "window.five-hour", "the suffixed window keeps the 5-hour label");
+	assert.equal(windows[1].hintKey, "window.five-hour.hint");
+	assert.equal(windows[1].windowMs, 5 * 3600e3, "and its time bar length");
+});
+
+test("GLM accepts string percentages and derives a missing MCP percentage from used/cap", () => {
+	const windows = providers.normalizeGlmUsage({
+		limits: [
+			{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: "12.5" },
+			{ type: "TIME_LIMIT", currentValue: "250", usage: "1000" }
+		]
+	});
+	assert.equal(windows[0].percent, 12.5);
+	const mcp = windows.find((window) => window.key === "mcp");
+	assert.equal(mcp.percent, 25, "used/cap is the same relation when percentage is absent");
+	assert.equal(mcp.used, 250);
+	assert.equal(mcp.cap, 1000);
+});
+
+test("epoch timestamps survive a string serialization", () => {
+	assert.equal(providers.toIso("1794070179518"), new Date(1794070179518).toISOString());
+	assert.equal(providers.toIso(1794070179518), new Date(1794070179518).toISOString());
+	assert.equal(providers.toIso("2026-11-08T00:00:00.000Z"), "2026-11-08T00:00:00.000Z");
+	assert.equal(providers.toIso("not a date"), null);
+	assert.equal(providers.toIso(0), null);
+});
+
+test("numeric strings count as finite numbers", () => {
+	assert.equal(providers.finiteNumber("12.5"), 12.5);
+	assert.equal(providers.finiteNumber(""), null);
+	assert.equal(providers.finiteNumber("   "), null);
+	assert.equal(providers.finiteNumber("abc"), null);
+	assert.equal(providers.finiteNumber(Number.NaN), null);
+	assert.equal(providers.finiteNumber(0), 0);
+});
+
+test("withTimeout abandons a provider read that never settles", async () => {
+	await assert.rejects(
+		providers.withTimeout(new Promise(() => {}), 20, "service read timed out"),
+		(error) => {
+			assert.equal(error.name, "ProviderError");
+			assert.equal(error.code, "read-failed");
+			assert.match(error.message, /timed out/);
+			return true;
+		}
+	);
+	assert.equal(await providers.withTimeout(Promise.resolve("ok"), 50, "unused"), "ok");
+	assert.equal(await providers.withTimeout("plain", 50, "unused"), "plain");
 });
 
 test("a Command Code credits failure names the cause instead of a generic empty response", async () => {

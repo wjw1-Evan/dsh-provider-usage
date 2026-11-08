@@ -13,17 +13,42 @@ const pkg = JSON.parse(readFileSync(path.resolve("package.json"), "utf8"));
 
 // ── browser shell stubs ────────────────────────────────────────────────────
 const styleTags = [];
+const documentListeners = new Map();
 globalThis.document = {
+	hidden: false,
 	querySelector: () => null,
 	createElement: () => ({ dataset: {}, textContent: "" }),
-	head: { appendChild: (tag) => styleTags.push(tag) }
+	head: { appendChild: (tag) => styleTags.push(tag) },
+	addEventListener: (type, listener) => {
+		const list = documentListeners.get(type) ?? [];
+		list.push(listener);
+		documentListeners.set(type, list);
+	},
+	removeEventListener: (type, listener) => {
+		const list = documentListeners.get(type) ?? [];
+		documentListeners.set(type, list.filter((entry) => entry !== listener));
+	}
 };
+
+/** Fake timers the widget/settings page schedule through `window.*`. */
+const fakeTimers = new Map();
+let fakeTimerSeq = 0;
+const addFakeTimer = (repeat) => (fn, ms) => {
+	const id = ++fakeTimerSeq;
+	fakeTimers.set(id, { id, fn, ms, repeat });
+	return id;
+};
+const clearFakeTimer = (id) => { fakeTimers.delete(id); };
 
 let captured = null;
 globalThis.window = {
 	__ModuleLoader__: {
 		load: (entry) => { captured = entry; }
-	}
+	},
+	setTimeout: addFakeTimer(false),
+	clearTimeout: clearFakeTimer,
+	setInterval: addFakeTimer(true),
+	clearInterval: clearFakeTimer
 };
 
 /** Minimal hook implementation: enough to construct elements, no effects. */
@@ -81,6 +106,187 @@ function findType(node, type, found = []) {
 	if (node.type === type) found.push(node);
 	if (node.props && node.props.children !== undefined) findType(node.props.children, type, found);
 	return found;
+}
+
+// ── effectful runtime for the load/poll state machine ─────────────────────
+// The plain stub above builds elements but never runs effects, which is all
+// the render assertions need. The widget's error recovery, the settings page's
+// stale follow-up and the hidden-tab poll chain only exist inside effects, so
+// those tests mount the real component on a tiny hook engine with controllable
+// fetch and timers.
+
+/** Render one component to completion on a shared hook engine. */
+function createHookEngine() {
+	const slots = [];
+	let cursor = 0;
+	let dirty = false;
+	/** Let every pending promise (fetch, json, state updates) land. */
+	const settle = async (rounds = 12) => {
+		for (let i = 0; i < rounds; i++) await new Promise((resolve) => setImmediate(resolve));
+	};
+	const commit = () => {
+		for (const slot of slots) {
+			if (slot.kind !== "effect" || !slot.pending) continue;
+			slot.pending = false;
+			slot.ran = true;
+			if (typeof slot.cleanup === "function") slot.cleanup();
+			const cleanup = slot.fn();
+			slot.cleanup = typeof cleanup === "function" ? cleanup : null;
+		}
+	};
+	const depsEqual = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length
+		&& a.every((value, index) => Object.is(value, b[index]));
+	const engine = {
+		Fragment: Symbol("Fragment"),
+		/** Latest rendered element tree (kept across external state changes). */
+		tree: null,
+		component: null,
+		props: null,
+		peek(index) { return slots[index]?.value; },
+		useState(initial) {
+			const index = cursor++;
+			if (!slots[index]) slots[index] = { kind: "state", value: typeof initial === "function" ? initial() : initial };
+			const slot = slots[index];
+			return [slot.value, (next) => {
+				const value = typeof next === "function" ? next(slot.value) : next;
+				if (!Object.is(value, slot.value)) {
+					slot.value = value;
+					dirty = true;
+				}
+			}];
+		},
+		useRef(initial) {
+			const index = cursor++;
+			if (!slots[index]) slots[index] = { kind: "ref", value: { current: initial } };
+			return slots[index].value;
+		},
+		useEffect(fn, deps) {
+			const index = cursor++;
+			if (!slots[index]) slots[index] = { kind: "effect", ran: false };
+			const slot = slots[index];
+			const same = slot.ran && depsEqual(deps, slot.deps);
+			slot.fn = fn;
+			slot.deps = deps;
+			if (!same) slot.pending = true;
+		},
+		useCallback(fn, deps) {
+			const index = cursor++;
+			if (!slots[index]) slots[index] = { kind: "callback" };
+			const slot = slots[index];
+			if (!depsEqual(deps, slot.deps)) {
+				slot.fn = fn;
+				slot.deps = deps;
+			}
+			return slot.fn;
+		},
+		/** Re-render until no effect/state change is left. */
+		async paint() {
+			for (let pass = 0; pass < 25; pass++) {
+				dirty = false;
+				cursor = 0;
+				engine.tree = engine.component(engine.props);
+				commit();
+				await settle();
+				if (!dirty) return engine.tree;
+			}
+			throw new Error("component did not settle");
+		},
+		async mount(component, props) {
+			engine.component = component;
+			engine.props = props;
+			return engine.paint();
+		},
+		unmount() {
+			for (const slot of slots) {
+				if (slot.kind === "effect" && typeof slot.cleanup === "function") slot.cleanup();
+				slot.cleanup = null;
+			}
+		}
+	};
+	return engine;
+}
+
+/** Load the bundle with a custom react implementation (fresh module instance). */
+function loadExportsWith(reactImpl) {
+	return captured.factory((specifier) => {
+		if (specifier === "react") return reactImpl;
+		if (specifier === "react/jsx-runtime") return jsxRuntime;
+		throw new Error(specifier);
+	});
+}
+
+/** Drop every scheduled fake timer and recorded document listener. */
+function resetTimers() {
+	fakeTimers.clear();
+	documentListeners.clear();
+}
+function timersWithDelay(ms) {
+	return [...fakeTimers.values()].filter((timer) => timer.ms === ms);
+}
+/** Run one fake timer, then let the component settle. */
+async function fireTimer(engine, timer) {
+	assert.ok(timer !== undefined, "the expected timer is scheduled");
+	fakeTimers.delete(timer.id);
+	await timer.fn();
+	await engine.paint();
+}
+
+/** Install a scripted fetch; returns the request log and a restore function. */
+function installFetch(steps) {
+	const original = globalThis.fetch;
+	const requests = [];
+	globalThis.fetch = async (url, init) => {
+		const step = steps.shift();
+		requests.push({ url: String(url), init: init ?? {} });
+		if (!step) throw new Error(`unexpected fetch #${requests.length} ${url}`);
+		if (step.throw) throw new Error(step.throw);
+		return {
+			status: step.status,
+			headers: { get: (name) => (String(name).toLowerCase() === "etag" ? (step.etag ?? null) : null) },
+			json: async () => JSON.parse(JSON.stringify(step.body ?? {}))
+		};
+	};
+	return { requests, restore: () => { globalThis.fetch = original; } };
+}
+
+/** One canonical usage document; `percent` keeps the body bytes distinct. */
+function usageBody(percent = 42) {
+	return {
+		ok: true,
+		enabled: ["command-code"],
+		providerOrder: ["command-code"],
+		providers: [{
+			id: "command-code",
+			name: "Command Code",
+			short: "CC",
+			status: "ok",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [{ key: "monthly", labelKey: "window.monthly", hintKey: null, percent, status: "ok", resetsAt: null, windowMs: null }],
+			meta: {}
+		}],
+		servedStale: false
+	};
+}
+
+/** Render the expanded widget from a seeded payload (no effects involved). */
+function renderWidgetData(data, t) {
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 0);
+	react.seed(3, new Set());
+	react.seed(4, {});
+	return loadExports().Widget({ wide: true, t });
+}
+
+/** The per-window rows of the first provider card. */
+function firstProviderRows(tree) {
+	const providers = tree.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const body = providers.props.children[0].props.children[1];
+	return body.props.children[0].props.children;
 }
 
 test("the bundle registers under the package name", () => {
@@ -1123,4 +1329,342 @@ test("both locales name the two GLM Code Plan versions", () => {
 	assert.equal(tables.zh["region.bigmodel"], "国内版");
 	assert.equal(tables.en["region.zai"], "International");
 	assert.equal(tables.en["region.bigmodel"], "China");
+});
+
+// ── load/poll state machine, formatting boundaries and registration cleanup ─
+
+/** Find the clickable error/retry line of a rendered widget tree. */
+function findRetryControl(node) {
+	if (!node || typeof node !== "object") return null;
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			const found = findRetryControl(child);
+			if (found) return found;
+		}
+		return null;
+	}
+	if (node.props && node.props.className === "dpu-err dpu-retry") return node;
+	return findRetryControl(node.props && node.props.children);
+}
+
+test("a failed read recovers when the next poll is answered with 304", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	const net = installFetch([
+		{ status: 200, etag: '"v1"', body: usageBody() },
+		{ throw: "upstream hiccup" },
+		{ status: 304, etag: '"v1"' },
+		{ status: 200, etag: '"v1"', body: usageBody() }
+	]);
+	try {
+		await engine.mount(exports.Widget, { wide: true, t: (key) => key });
+		assert.notEqual(engine.peek(0), null, "the first document renders");
+		assert.equal(net.requests[0].init.headers, undefined, "the first read carries no validator");
+
+		// A poll tick fails: the panel drops to the error line.
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		assert.equal(engine.peek(0), null, "a failed read clears the document");
+		assert.equal(typeof engine.peek(1), "string", "a failed read surfaces the error");
+		assert.equal(net.requests[1].init.headers["if-none-match"], '"v1"', "the poll keeps the validator");
+
+		// The next poll is answered 304 although nothing is on screen: the
+		// client must drop the validator and refetch instead of staying empty.
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		const recovery = net.requests[3];
+		assert.ok(recovery !== undefined, "a 304 without data triggers one unconditional refetch");
+		assert.match(recovery.url, /\?refresh=1/, "the recovery read is forced");
+		assert.equal(recovery.init.headers, undefined, "a forced read carries no if-none-match");
+		assert.notEqual(engine.peek(0), null, "the recovery read renders the document");
+		assert.equal(engine.peek(1), null, "and clears the error");
+	} finally {
+		net.restore();
+		resetTimers();
+	}
+});
+
+test("a failed read recovers when the recovery answer repeats the old body byte for byte", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	const body = usageBody();
+	const net = installFetch([
+		{ status: 200, etag: '"v1"', body },
+		{ throw: "upstream hiccup" },
+		{ status: 200, body }
+	]);
+	try {
+		await engine.mount(exports.Widget, { wide: true, t: (key) => key });
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		assert.equal(engine.peek(0), null, "the failed read clears the document");
+
+		// A host that ignores If-None-Match answers with the identical document:
+		// the byte-compare shortcut must not swallow the recovery.
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		assert.equal(net.requests.length, 3);
+		assert.notEqual(engine.peek(0), null, "the identical document is rendered again");
+		assert.equal(engine.peek(1), null, "and the error is cleared");
+		assert.equal(engine.peek(0).providers.length, 1, "the recovered document carries its provider");
+	} finally {
+		net.restore();
+		resetTimers();
+	}
+});
+
+test("the click-to-retry read is forced and carries no stale validator", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	const net = installFetch([
+		{ status: 200, etag: '"v1"', body: usageBody() },
+		{ throw: "upstream hiccup" },
+		{ status: 200, etag: '"v1"', body: usageBody() }
+	]);
+	try {
+		await engine.mount(exports.Widget, { wide: true, t: (key) => key });
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		const retry = findRetryControl(engine.tree);
+		assert.ok(retry !== null, "the error line is a retry control");
+		retry.props.onClick();
+		await engine.paint();
+		assert.match(net.requests[2].url, /\?refresh=1/, "the retry forces an upstream read");
+		assert.equal(net.requests[2].init.headers, undefined, "and drops the stale if-none-match");
+		assert.notEqual(engine.peek(0), null, "the retry restores the document");
+		assert.equal(engine.peek(1), null, "the retry clears the error");
+	} finally {
+		net.restore();
+		resetTimers();
+	}
+});
+
+test("an all-disabled host answer renders the localized notice, not the host wording", async () => {
+	const render = async (step) => {
+		const engine = createHookEngine();
+		const exports = loadExportsWith(engine);
+		resetTimers();
+		const net = installFetch([step]);
+		try {
+			const tree = await engine.mount(exports.Widget, { wide: true, t: (key) => key });
+			return { flat: JSON.stringify(tree), engine, net };
+		} finally {
+			net.restore();
+		}
+	};
+
+	try {
+		// Current host: 200 with an empty provider list and no error string.
+		const current = await render({ status: 200, body: { ok: false, providers: [], enabled: [], servedStale: false } });
+		assert.match(current.flat, /"className":"dpu-err","children":"noProviders"/, "the localized notice renders for the current host");
+		assert.equal(current.engine.peek(1), null, "a configuration state is not an error");
+		assert.notEqual(current.engine.peek(0), null, "the empty document is kept");
+
+		// Older host: the same state answered as 502 with its English wording.
+		const legacy = await render({ status: 502, body: { ok: false, providers: [], enabled: [], error: "no providers enabled", servedStale: false } });
+		assert.match(legacy.flat, /"className":"dpu-err","children":"noProviders"/, "the legacy 502 is folded into the same notice");
+		assert.doesNotMatch(legacy.flat, /no providers enabled/, "the host's English wording is not shown");
+		assert.equal(legacy.engine.peek(1), null, "the legacy 502 is not treated as a failure");
+
+		// A host exception also sends empty lists; its own message must survive.
+		const failed = await render({ status: 502, body: { ok: false, providers: [], enabled: [], error: "collectUsage exploded" } });
+		assert.doesNotMatch(failed.flat, /noProviders/, "a real host failure is not mistaken for a configuration state");
+		assert.equal(failed.engine.peek(1), "collectUsage exploded", "the host failure keeps its message");
+	} finally {
+		resetTimers();
+	}
+});
+
+test("a reset less than a minute away reads as resets-soon, not zero minutes", () => {
+	const windowRow = (resetsAt) => ({
+		key: "five-hour",
+		labelKey: "window.five-hour",
+		hintKey: "window.five-hour.hint",
+		percent: 10,
+		status: "ok",
+		resetsAt,
+		windowMs: 5 * 3600e3
+	});
+	const provider = (win) => ({
+		id: "command-code",
+		name: "Command Code",
+		status: "ok",
+		account: null,
+		plan: null,
+		fallback: null,
+		balance: null,
+		windows: [win],
+		meta: {}
+	});
+	const tt = (key, params) => (params ? key + JSON.stringify(params) : key);
+	const slotText = (win) => {
+		const rows = firstProviderRows(renderWidgetData({ providers: [provider(win)], providerOrder: ["command-code"] }, tt));
+		return rows[0].props.children[1].props.children[1];
+	};
+
+	const soon = slotText(windowRow(new Date(Date.now() + 30_000).toISOString()));
+	assert.equal(soon.props.children, "time.soon", "30s out is not '0m'");
+
+	// 5.5 minutes, not exactly 5: the countdown floors, so a few milliseconds
+	// between seeding and rendering must not flip it to "4".
+	const fiveMinutes = slotText(windowRow(new Date(Date.now() + 5 * 60_000 + 30_000).toISOString()));
+	assert.equal(fiveMinutes.props.children, 'time.minutes{"n":5}', "ordinary countdowns keep the minute label");
+});
+
+test("tokensUsed keeps its unit after rounding", () => {
+	const tokens = (value, locale) => {
+		const t = (key, params) => (key === "unit.locale" ? locale : params ? key + JSON.stringify(params) : key);
+		const data = {
+			providers: [{
+				id: "command-code",
+				name: "Command Code",
+				status: "ok",
+				account: null,
+				plan: null,
+				fallback: null,
+				balance: null,
+				windows: [{ key: "monthly", labelKey: "window.monthly", percent: 50, status: "ok", resetsAt: null, windowMs: null, tokensUsed: value }],
+				meta: {}
+			}],
+			providerOrder: ["command-code"]
+		};
+		const rows = firstProviderRows(renderWidgetData(data, t));
+		return rows[0].props.children[0].props.children[1].props.children;
+	};
+
+	assert.equal(tokens(999_499, "en"), "Token:999.5K", "a value that stays below the next unit keeps one decimal");
+	assert.equal(tokens(999_999, "en"), "Token:1M", "999,999 rounds into M, not 1000K");
+	assert.equal(tokens(999_999_999, "en"), "Token:1B", "999,999,999 rounds into B, not 1000M");
+	assert.equal(tokens(1e12, "en"), "Token:1T", "1e12 promotes into T");
+	assert.equal(tokens(99_999_999, "zh"), "Token:1亿", "中文 99,999,999 进位到 1亿，而不是 10000万");
+	assert.equal(tokens(9999, "zh"), "Token:9,999", "低于万的值保留分组数字");
+});
+
+test("the settings-page registration hands its disposer back to the host", () => {
+	const exports = loadExports();
+
+	// slots.inject(callback): the callback's return value is the cleanup that
+	// ctx.effect installs, so both registrations must return one.
+	const injected = new Map();
+	const disposed = [];
+	const injectCtx = {
+		effect: (fn) => { fn(); return () => {}; },
+		locale: { register: () => () => {} },
+		slots: {
+			inject: (name, callback) => { injected.set(name, callback); },
+			register: (options) => {
+				const dispose = () => disposed.push(options.name);
+				return dispose;
+			}
+		}
+	};
+	exports.apply(injectCtx);
+	const widgetDispose = injected.get("sidebar.footer.action")();
+	const configDispose = injected.get("plugins.bundle.config")();
+	assert.equal(typeof widgetDispose, "function", "the widget returns its slot disposer");
+	assert.equal(typeof configDispose, "function", "the settings page returns its slot disposer too");
+	configDispose();
+	assert.deepEqual(disposed, ["plugins.bundle.config"], "the keyed config entry is released on teardown");
+
+	// A host without slots.inject registers through ctx.effect: its cleanup
+	// must dispose both entries as well.
+	const effectCleanups = [];
+	const legacyDisposed = [];
+	const legacyCtx = {
+		effect: (fn) => {
+			const cleanup = fn();
+			if (typeof cleanup === "function") effectCleanups.push(cleanup);
+			return cleanup;
+		},
+		locale: { register: () => () => {} },
+		slots: { register: (options) => () => legacyDisposed.push(options.name) }
+	};
+	exports.apply(legacyCtx);
+	assert.equal(effectCleanups.length, 4, "context, dictionaries, widget and settings page each install an effect");
+	for (const cleanup of effectCleanups) cleanup();
+	assert.deepEqual(legacyDisposed, ["sidebar.footer.action", "plugins.bundle.config"], "the legacy path disposes both registrations");
+});
+
+test("the settings page follows up a servedStale usage answer", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	const settingsBody = {
+		ok: true,
+		namespace: "dsh-multi-provider-usage",
+		revision: 1,
+		value: { providerOrder: ["opencode-go", "command-code", "glm"] },
+		detection: null
+	};
+	const staleBody = { ok: true, providers: [], enabled: [], providerOrder: [], servedStale: true };
+	const freshBody = { ok: true, providers: [], enabled: [], providerOrder: [], servedStale: false };
+	const net = installFetch([
+		{ status: 200, body: settingsBody },
+		{ status: 200, body: staleBody },
+		{ status: 200, body: staleBody },
+		{ status: 200, body: freshBody }
+	]);
+	const usageRequests = () => net.requests.filter((request) => request.url.startsWith("/provider-usage/usage"));
+	try {
+		await engine.mount(exports.SettingsPage, {});
+		assert.equal(usageRequests().length, 1, "the page reads the usage snapshot on mount");
+		assert.equal(timersWithDelay(4000).length, 1, "a servedStale answer schedules one follow-up read");
+
+		await fireTimer(engine, timersWithDelay(4000)[0]);
+		assert.equal(usageRequests().length, 2, "the follow-up re-reads the snapshot");
+		assert.equal(timersWithDelay(4000).length, 1, "still stale, so another follow-up is queued");
+
+		await fireTimer(engine, timersWithDelay(4000)[0]);
+		assert.equal(usageRequests().length, 3);
+		assert.equal(timersWithDelay(4000).length, 0, "a fresh answer cancels the follow-up");
+		assert.equal(engine.peek(5).error, null, "the page settles on the fresh snapshot");
+	} finally {
+		net.restore();
+		resetTimers();
+	}
+});
+
+test("the settings page cancels a pending stale follow-up on unmount", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	const net = installFetch([
+		{ status: 200, body: { ok: true, namespace: "dsh-multi-provider-usage", revision: 1, value: {}, detection: null } },
+		{ status: 200, body: { ok: true, providers: [], enabled: [], servedStale: true } }
+	]);
+	try {
+		await engine.mount(exports.SettingsPage, {});
+		assert.equal(timersWithDelay(4000).length, 1);
+		engine.unmount();
+		assert.equal(timersWithDelay(4000).length, 0, "unmounting drops the pending follow-up timer");
+	} finally {
+		net.restore();
+		resetTimers();
+	}
+});
+
+test("a hidden tab stops the poll chain until it becomes visible again", async () => {
+	const engine = createHookEngine();
+	const exports = loadExportsWith(engine);
+	resetTimers();
+	document.hidden = true;
+	const net = installFetch([{ status: 200, etag: '"v1"', body: usageBody() }]);
+	try {
+		await engine.mount(exports.Widget, { wide: true, t: (key) => key });
+		assert.equal(net.requests.length, 0, "a hidden mount does not read");
+		assert.equal(timersWithDelay(30_000).length, 1, "the poll chain is armed");
+
+		await fireTimer(engine, timersWithDelay(30_000)[0]);
+		assert.equal(net.requests.length, 0, "a hidden wakeup does not read");
+		assert.equal(timersWithDelay(30_000).length, 0, "and it does not re-arm the chain");
+
+		document.hidden = false;
+		for (const listener of documentListeners.get("visibilitychange") ?? []) listener();
+		await engine.paint();
+		assert.equal(net.requests.length, 1, "becoming visible catches up with one read");
+		assert.equal(timersWithDelay(30_000).length, 1, "and restarts the chain");
+		assert.notEqual(engine.peek(0), null, "the catch-up read renders the document");
+	} finally {
+		net.restore();
+		resetTimers();
+		document.hidden = false;
+	}
 });

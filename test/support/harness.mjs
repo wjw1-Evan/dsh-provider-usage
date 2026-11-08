@@ -129,8 +129,12 @@ export function glmFixture(overrides = {}) {
  *   opencodeStatus?: number,
  *   opencodeError?: Error | null,
  *   console?: object | null,
+ *   consoleError?: Error | null,
+ *   consoleStatus?: number,
  *   commandCode?: ReturnType<typeof commandCodeFixture>,
  *   commandCodeFail?: string | null,
+ *   commandCodeFailStatus?: number,
+ *   commandCodeFailError?: Error | null,
  *   glm?: { zai?: object | null, bigmodel?: object | null },
  * }} [options]
  */
@@ -144,8 +148,19 @@ export function installWire(options = {}) {
 		console: options.console === undefined
 			? { availableMicroCents: "501495352", balanceMicroCents: "501495352", billingMode: "prepaid", mode: "pay-as-you-go", canPurchaseCredits: true }
 			: options.console,
+		// `consoleError` makes the balance call fail on the wire (the undici
+		// "fetch failed" a network blip produces); `consoleStatus` answers it
+		// with another HTTP status. Tests can flip both on `wire.state`.
+		consoleError: options.consoleError ?? null,
+		consoleStatus: options.consoleStatus ?? 200,
 		commandCode,
+		// Failing a Command Code path answers `commandCodeFailStatus` (500 by
+		// default); `commandCodeFailError` makes the request fail on the wire
+		// instead (the undici "fetch failed" a real network blip produces).
+		// Tests can flip these on `wire.state` between polls.
 		commandCodeFail: options.commandCodeFail ?? null,
+		commandCodeFailStatus: options.commandCodeFailStatus ?? 500,
+		commandCodeFailError: options.commandCodeFailError ?? null,
 		glm: options.glm ?? { zai: glmFixture(), bigmodel: null }
 	};
 	/** @type {Array<{ url: string, method: string, headers: Headers }>} */
@@ -156,8 +171,9 @@ export function installWire(options = {}) {
 		requests.push(record);
 		if (url.includes("registry.npmjs.org")) return jsonResponse(state.registry);
 		if (url.includes("/console/api/billing/status")) {
+			if (state.consoleError !== null) throw state.consoleError;
 			if (state.console === null) return jsonResponse({ _tag: "Forbidden" }, 403);
-			return jsonResponse(state.console);
+			return jsonResponse(state.console, state.consoleStatus);
 		}
 		if (url.includes("/v1/usage")) {
 			if (state.opencodeError !== null) throw state.opencodeError;
@@ -165,7 +181,8 @@ export function installWire(options = {}) {
 		}
 		if (url.includes("api.commandcode.ai/alpha/")) {
 			if (state.commandCodeFail !== null && url.includes(state.commandCodeFail)) {
-				return jsonResponse({ error: { message: "fixture failure" } }, 500);
+				if (state.commandCodeFailError !== null) throw state.commandCodeFailError;
+				return jsonResponse({ error: { message: "fixture failure" } }, state.commandCodeFailStatus);
 			}
 			if (url.includes("/alpha/whoami")) return jsonResponse(commandCode.whoami);
 			if (url.includes("/alpha/billing/subscriptions")) return jsonResponse(commandCode.subscription);
@@ -271,12 +288,16 @@ export function makeSettings({ value = {}, revision = 1, ns = "dsh-multi-provide
 	return settings;
 }
 
+/** Port of the most recently created stub context; the default route Host. */
+let lastPort = 1234;
+
 /**
  * Stub context with the surfaces `apply()` touches: web routes, commands,
  * credentials, event listeners, loader entries, `ctx.get()` services and the
  * fiber's own entry id.
  */
 export function makeCtx(options = {}) {
+	if (typeof options.port === "number") lastPort = options.port;
 	const routes = [];
 	const commands = [];
 	const listeners = [];
@@ -385,9 +406,21 @@ function responseStub() {
 
 /**
  * Invoke one registered route with a synthetic request.
+ *
+ * The manifest of a same-origin browser request is supplied by default: a
+ * loopback `Host` (the stub context's port). `host` overrides it, and `origin` /
+ * `secFetchSite` model the browser markers the Host/Origin fence inspects.
  * @param {Array<{ path: string, handler: Function }>} routes
  * @param {string} routePath
- * @param {{ method?: string, url?: string, headers?: Record<string, string>, body?: string }} [request]
+ * @param {{
+ *   method?: string,
+ *   url?: string,
+ *   host?: string,
+ *   origin?: string,
+ *   secFetchSite?: string,
+ *   headers?: Record<string, string>,
+ *   body?: string,
+ * }} [request]
  */
 export async function callRoute(routes, routePath, request = {}) {
 	const route = routes.find((candidate) => candidate.path === routePath);
@@ -397,7 +430,11 @@ export async function callRoute(routes, routePath, request = {}) {
 	const req = Readable.from(request.body === undefined ? [] : [Buffer.from(request.body, "utf8")]);
 	req.method = request.method ?? "GET";
 	req.url = request.url ?? routePath;
-	req.headers = request.headers ?? {};
+	const headers = { host: `127.0.0.1:${lastPort}`, ...(request.headers ?? {}) };
+	if (typeof request.host === "string") headers.host = request.host;
+	if (typeof request.origin === "string") headers.origin = request.origin;
+	if (typeof request.secFetchSite === "string") headers["sec-fetch-site"] = request.secFetchSite;
+	req.headers = headers;
 	const res = responseStub();
 	await route.handler(req, res);
 	return {

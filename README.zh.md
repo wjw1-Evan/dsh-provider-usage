@@ -52,11 +52,15 @@
   和设置页的「实时用量」一致生效，不用点开卡片也能一眼看到余额告急。
 - **失败可一键重试** — 读取失败时，组件里的错误文字本身可点击（也支持键盘
   Enter/空格），立即强制重新读取。
+- **网络抖动不会清空卡片** — 只在网络层失败的刷新（`fetch failed`、超时、HTTP
+  `5xx`/`429`）直接返回上一次成功读取的结果（`servedStale: true`），不显示错误，
+  组件继续显示旧数字，宿主在后台重试。真正的失败——密钥缺失或被拒、供应商
+  `{ success: false }`——仍会显示错误卡片，并让记住的旧数据失效。
 - **同源代理** — 浏览器只访问 `/provider-usage/usage` 和
   `/provider-usage/settings`，API Key 始终留在宿主进程。
 - **故障隔离** — 一个服务商失败不会影响另外两个；只要还有服务商成功，路由就返回
   `200`，全部失败才返回 `502`。部分接口失败时数字照常显示，但健康点变黄，悬停
-  列出失败的那几个接口。
+  列出失败的那几个接口（瞬时失败不再列出，见上）。
 - **设置快捷入口** — 组件标题栏的「设置」按钮直接打开侧边栏「插件」中的本插件
   页面，并定位到下面的配置页。
 - **插件设置页** — 侧边栏「插件」→ 本插件卡片：启用/禁用服务商、编辑凭据引用和
@@ -154,7 +158,10 @@ Plugins 面板中的设置页，悬停提示修复方式：运行 `opencode auth
 `opencode.db`），`opencodeConsoleOrgId` 提供 `x-org-id`，
 `opencodeConsoleEnabled: false` 可关闭余额读取。余额失败不会影响 GO 额度：
 provider 仍为 `ok`，`balance` 为 `null` 并带 `meta.balanceError`（可由用户修复时
-另带 `meta.balanceSetup`）。其它余额失败显示灰色「余额 —」，悬停给出原因。
+另带 `meta.balanceSetup`）。其它余额失败显示灰色「余额 —」，悬停给出原因。只在网络层
+失败的余额请求（`fetch failed`、超时、HTTP `5xx`/`429`）完全不显示：它只带
+`meta.balanceTransient`，宿主沿用上一次已知余额，辅助请求的抖动既不会清空余额位，
+也不会在额度旁边打印错误。
 
 ### Command Code 余额
 
@@ -164,12 +171,34 @@ OpenCode 那样分叉：缺少 `COMMANDCODE_API_KEY` 且没有 `~/.commandcode/a
 显式报告而不是留白：
 
 - `/alpha/billing/credits` 失败时，由于所有窗口都来自这个请求，服务商本身也会
-  进入错误状态；错误消息现在会带上底层接口和状态码，而不是只显示
+  进入错误状态——除非还有上一次成功读取可以提供（见下文「瞬时失败沿用旧数据」）；
+  错误消息现在会带上底层接口和状态码，而不是只显示
   “no usable quota windows”，同时 `meta.balanceError` 让标题栏显示灰色
   「余额 —」并携带原因；
 - credits 请求成功但没有 `purchasedCredits` / `freeCredits` 时，`balance` 保持
   `null` 并带 `meta.balanceMissing: true`，标题栏显示灰色「无充值额度」（接口
   真的返回 0 时仍显示 `$0.00`）。
+
+**接口级失败与周期（0.8.7 起）**：Command Code 用 HTTP 200 + `{ success: false }`
+信封表达限流/权限等失败，现在会被识别成错误并把信封里的原因带进消息（以前会被当成
+有效数据，最后只剩一句 `no usable quota windows`）。`/alpha/billing/subscriptions`
+失败时，账单周期改用 `/alpha/usage/summary` 自己的 `periodStart` / `periodBasis`，
+只有确认是账单周期口径的数据才会进入月窗口。
+
+**瞬时失败沿用旧数据（0.8.7 起）**：只在网络层失败的刷新——`fetch failed`、超时、
+HTTP `5xx` 或 `429`——不再把服务商替换成错误卡片。只要宿主还持有同一账号上一次成功
+读取的结果，就直接返回它（`servedStale: true`）并在下一次刷新时重试，侧栏因此继续
+显示上一次的数字，而不是 `Command Code: Command Code /alpha/whoami: fetch failed; …`。
+该规则对所有服务商生效，不只 Command Code。瞬时性的**部分**接口失败也不会进入
+`meta.errors`，健康点与 tooltip 保持安静。真正的失败不会被隐藏：缺少密钥、`401` /
+`403`、供应商 `{ success: false }` 信封，或尚无任何成功读取的服务商，仍会显示错误
+卡片（真正的失败还会让记住的旧数据失效）。判定依据是各家自己的状态码——OpenCode
+GO 与 GLM 会重新包装原始错误，被拒绝的密钥也不会被误判成网络抖动；辅助的 OpenCode
+控制台余额请求同理，网络失败时沿用上一次余额而不是显示「余额 —」。
+
+**GLM 防御性解析（0.8.7 起）**：`percentage` 接受数字字符串（国内版常见变体）；
+`TIME_LIMIT` 缺 `percentage` 时用 `currentValue / usage` 推导；同类型的重复 limit
+以 `-2` 后缀区分但仍保留原窗口的标签、提示与时间条长度（不再变成「其他窗口」）。
 
 ### OpenCode GO 集成与回退
 
@@ -194,10 +223,14 @@ OpenCode 那样分叉：缺少 `COMMANDCODE_API_KEY` 且没有 `~/.commandcode/a
 | Command Code | `five-hour`、`weekly`、`monthly` | 5 小时、7 天、真实账单周期 |
 | GLM Code Plan | `five-hour`、`weekly`、`mcp` | 5 小时、7 天、月度 |
 
-百分比表示**已使用**比例，显示时限制在 `[0, 100]`。Command Code 的月用量为
-`totalCost / (totalCost + monthlyCredits)`；购买额度和免费额度单独记录在
-`meta.monthly`，不改变套餐条；两者之和就是可见的充值余额（`balance.extra`）。5 小时/周窗口来自
-`windowLimits.fiveHour` / `weekly`（`used`、`cap`、`resetAt`、`exceeded`）。
+百分比表示**已使用**比例，显示时限制在 `[0, 100]`。Command Code 的月套餐条只用
+**套餐额度池**：`summary.totalMonthlyCredits / 套餐总额`（套餐总额未知时退回
+`planUsed + monthlyCredits`）。`summary.totalCost` 同时包含购买额度与免费额度的
+消耗（`totalCost = totalMonthlyCredits + totalPurchasedCredits + totalFreeCredits`），
+所以它不再进入套餐条——购买/免费额度只出现在 `meta.monthly`（`used`、`purchased`、
+`free`、`extra`）和充值余额 `balance.extra` 里，`meta.monthly.planUsed` 是该窗口的
+套餐口径用量。5 小时/周窗口来自 `windowLimits.fiveHour` / `weekly`
+（`used`、`cap`、`resetAt`、`exceeded`）。
 
 **极小用量的显示（0.8.6 起）**：5 小时/周窗口刚重置时用量常低于 0.05%，
 `used / cap` 换成像素宽度不足 1px，绿条会整条消失——看起来像只有一条（蓝色的
@@ -270,6 +303,10 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 
 `?refresh=1`（或 `?force=1`）绕过宿主缓存。
 
+**200** 且 `providers: []`、`enabled: []` 表示三个服务商都被禁用（这是配置状态，
+组件显示本地化的空态提示）；**502** 表示服务商存在但全部读取失败，响应体仍带每个
+服务商的错误信息。
+
 ```json
 {
   "ok": true,
@@ -320,16 +357,20 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 照常返回。`providers: []` 表示没有启用任何服务商。`meta.balanceError` 表示被容忍
 的余额失败（provider 仍为 `ok`）；`meta.balanceSetup`（`no-credential`、`api-key`
 或 `expired`）表示用户重新登录即可修复的余额状态；`meta.balanceMissing` 表示
-Command Code 的 credits 响应没有购买/免费额度。`meta.errors` 列出 Command Code
-的部分接口失败：数字照常显示，但健康点变黄，悬停可看到失败的接口。错误卡片仍
-保留已经解析出的套餐信息。
+Command Code 的 credits 响应没有购买/免费额度。`meta.errors` 列出值得展示的
+Command Code 部分接口失败：数字照常显示，但健康点变黄，悬停可看到失败的接口
+（瞬时失败——超时、`5xx`、`429`——不会列出，见上文「瞬时失败沿用旧数据」）。错误
+卡片仍保留已经解析出的套餐信息。
 
 **缓存与刷新语义（0.8.1 起）**：宿主为每家服务商维护 TTL 缓存（`cacheMs`，默认
 30 s）。缓存过期后，下一次请求**立即返回上一次的结果**（顶层与对应 provider 带
 `servedStale: true` 标记），同时在后台重新读取上游——慢供应商（最长 15 s 超时）
 不再阻塞侧栏 Widget 和 `/provider-usage` 命令；Widget 收到 `servedStale` 后数秒
 内自动跟进新数据。`?refresh=1` 仍是阻塞式新读（手动刷新与保存设置后的行为不
-变）；账号/来源切换不会拿到旧账号的数据。响应带 `ETag`，携带 `If-None-Match`
+变）；账号/来源切换不会拿到旧账号的数据。只在网络层失败的读取会返回上一次的好
+数据而不是错误（见上文「瞬时失败沿用旧数据」），后台刷新失败也不会用错误结果
+覆盖已有的好文档。保存设置会清掉缓存（下一次轮询用新设置重读），但每家服务商的
+上一次好数据会保留下来作为回退。响应带 `ETag`，携带 `If-None-Match`
 的请求在文档未变化时得到 `304`（无响应体）；侧栏 Widget 在数据无变化时自动拉
 长轮询间隔（30 s 起步，最长 2 min）。
 
@@ -408,9 +449,9 @@ npm test
 ```
 
 测试是封闭的：伪造 `globalThis.fetch` + stub Cordis 上下文，不访问网络、不使用真实
-密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存与
-强制刷新、设置冲突/白名单、客户端 bundle 契约、充值余额发现（凭据 / 本地
-auth.json）与失败隔离、会话头注入、余额变化动画；共 110 个测试。
+密钥。覆盖 schema、三个适配器、OpenCode GO 服务集成/回退、聚合与故障隔离、缓存、
+强制刷新与瞬时失败沿用旧数据、设置冲突/白名单、客户端 bundle 契约、充值余额发现
+（凭据 / 本地 auth.json）与失败隔离、会话头注入、余额变化动画、瞬时失败回退；共 164 个测试。
 
 ## 许可证
 
