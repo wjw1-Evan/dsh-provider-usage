@@ -269,6 +269,16 @@ object with one of: `not-installed`, `entry-disabled`, `service-unavailable`,
 reason and message in its tooltip. `opencodeGoSource: "builtin"` pins the HTTP
 path and never touches the other plugin.
 
+**No subscription (since 0.8.8)**: a `401`/`403` from `/v1/usage` whose body is
+OpenCode's `EntitlementError` (for example `OpenCode Go subscription required.`)
+is classified as `no-subscription`: the key itself was accepted, but its account
+has no OpenCode GO subscription. The widget and the settings page show a
+localized "check the subscription or disable the provider" line instead of the
+gateway's raw JSON, and the unrelated
+`dsh-opencode-go: not-installed` fallback note is no longer appended to it (the
+fallback still travels in `fallback` / `meta` for diagnostics). The state is not
+transient, so stale numbers never hide it.
+
 ## Plan windows
 
 | Provider | Windows | Window length |

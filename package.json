@@ -1,6 +1,6 @@
 {
   "name": "dsh-multi-provider-usage",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "description": "DSH (DeepSeek Harness) plugin: one collapsible sidebar widget for OpenCode GO, Command Code and GLM Code Plan quotas plus top-up balances, a periodic balance-change animation, automatic checkout and installed-package updates, same-origin usage proxies, a Plugins-panel settings page and a /provider-usage chat command (DSH 0.1.7+ compatible)",
   "type": "module",
   "main": "lib/index.js",

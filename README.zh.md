@@ -215,6 +215,13 @@ GO 与 GLM 会重新包装原始错误，被拒绝的密钥也不会被误判成
 组件显示「内置」徽标，悬停可看原因和消息。`opencodeGoSource: "builtin"` 会固定
 走 HTTP 接口，完全不读取另一个插件。
 
+**没有订阅（0.8.8 起）**：若 `/v1/usage` 返回 `401`/`403`，且响应体是 OpenCode 的
+`EntitlementError`（例如 `OpenCode Go subscription required.`），宿主把该失败归类为
+`no-subscription`：密钥本身有效，只是账号没有 OpenCode GO 订阅。挂件和设置页显示
+本地化的「请确认订阅或停用该服务商」提示，不再把网关的原始 JSON 当作错误正文，也
+不再附加与订阅无关的 `dsh-opencode-go: not-installed` 回退说明（回退信息仍保留在
+`fallback` / `meta` 中供诊断）。该状态不是瞬时故障，不会用旧数字掩盖。
+
 ## 套餐窗口
 
 | 服务商 | 窗口 | 窗口长度 |

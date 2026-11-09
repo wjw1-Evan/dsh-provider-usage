@@ -234,6 +234,19 @@ test("the chat command reports missing and partial balances instead of omitting 
 	assert.match(partialText, /购买 \$7\.44 \+ 免费 \$0\.00/, "the balance line names purchased and free credits");
 });
 
+test("the chat command names a missing OpenCode GO subscription instead of quoting the gateway", async () => {
+	const { commands } = await bootWith({
+		wire: {
+			opencode: { type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." } },
+			opencodeStatus: 403
+		}
+	});
+	const command = commands.find((candidate) => candidate.name === "provider-usage");
+	const text = (await command.handler()).text;
+	assert.match(text, /没有 OpenCode GO 订阅/);
+	assert.doesNotMatch(text, /EntitlementError|subscription required/);
+});
+
 test("the chat command guides API-key and expired console logins to re-authenticate", async () => {
 	const command = (booted) => booted.commands.find((candidate) => candidate.name === "provider-usage");
 	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");

@@ -288,6 +288,48 @@ test("a revoked OpenCode GO key stays actionable (the wrapper keeps its status)"
 	);
 });
 
+test("an account without the OpenCode GO subscription is its own setup state, without fallback noise", async () => {
+	installWire({
+		opencode: {
+			type: "error",
+			error: { type: "EntitlementError", message: "OpenCode Go subscription required." }
+		},
+		opencodeStatus: 403
+	});
+	await assert.rejects(
+		providers.readOpencodeGo({
+			config: { source: "builtin", apiKeyEnv: "OPENCODE_GO_API_KEY", baseUrl: "https://opencode.ai/zen/go" },
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		}),
+		(error) => {
+			assert.equal(error.code, "no-subscription", "the entitlement refusal is not a generic HTTP error");
+			assert.equal(error.httpStatus, 403, "the vendor's status still travels for diagnostics");
+			assert.match(error.message, /subscription/i);
+			assert.doesNotMatch(error.message, /EntitlementError|"type":"error"/, "the raw JSON envelope stays out of the user-facing line");
+			assert.notEqual(error.transient, true, "a missing subscription cannot be papered over with stale numbers");
+			return true;
+		}
+	);
+});
+
+test("a rejected OpenCode GO key keeps its status even when the integration is also missing", async () => {
+	installWire({ opencodeStatus: 401 });
+	await assert.rejects(
+		providers.readOpencodeGo({
+			config: { source: "opencode-go", apiKeyEnv: "OPENCODE_GO_API_KEY", baseUrl: "https://opencode.ai/zen/go" },
+			resolveCredential: resolver({ OPENCODE_GO_API_KEY: "sk-go" }),
+			entry: null
+		}),
+		(error) => {
+			assert.equal(error.code, "http-error");
+			assert.match(error.message, /dsh-opencode-go: not-installed/, "the fallback note still explains a plain HTTP failure");
+			assert.equal(error.fallback.reason, "not-installed");
+			return true;
+		}
+	);
+});
+
 test("a rejected GLM probe is not transient, and a mixed read is only transient when every probe was", async () => {
 	// A single rejected probe: the setup is wrong, whatever the last answer was.
 	const unauthorized = async () => jsonResponse({ error: "unauthorized" }, 401);

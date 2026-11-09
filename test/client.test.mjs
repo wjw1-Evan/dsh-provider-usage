@@ -819,6 +819,16 @@ test("the usage section renders quota windows, balance and a failed provider", (
 	}));
 	assert.match(errored, /cfg\.usage\.error/, "a failed provider renders the error");
 	assert.match(errored, /GLM 500: boom/);
+
+	react.reset();
+	const noSub = JSON.stringify(exports.UsageSection({
+		t: tt,
+		enabled: true,
+		provider: { id: "opencode-go", name: "OpenCode GO", status: "error", code: "no-subscription", error: "OpenCode GO: this account has no active OpenCode GO subscription", windows: [], meta: null },
+		phase: "ready"
+	}));
+	assert.match(noSub, /cfg\.usage\.no-subscription/, "a missing subscription is explained, not shown as a read failure");
+	assert.doesNotMatch(noSub, /cfg\.usage\.error/);
 });
 
 test("the usage section falls back to placeholders, not blanks", () => {
@@ -1132,6 +1142,39 @@ test("an error line is a keyboard-reachable retry control", () => {
 	assert.equal(react.peek(2), stampBefore + 1, "Enter forces a refresh");
 	errorLine.props.onKeyDown({ key: "Tab", preventDefault: () => {} });
 	assert.equal(react.peek(2), stampBefore + 1, "Tab does not force a refresh");
+});
+
+test("a missing OpenCode GO subscription renders guidance, not the raw entitlement envelope", () => {
+	const exports = loadExports();
+	const data = {
+		providers: [{
+			id: "opencode-go",
+			name: "OpenCode GO",
+			status: "error",
+			code: "no-subscription",
+			error: "OpenCode GO: this account has no active OpenCode GO subscription",
+			account: null,
+			plan: null,
+			fallback: { from: "opencode-go", reason: "not-installed", message: "dsh-opencode-go is not installed" },
+			balance: null,
+			windows: [],
+			meta: null
+		}],
+		defaultProvider: "auto"
+	};
+	react.reset();
+	react.seed(0, data);
+	react.seed(1, null);
+	react.seed(2, 5);
+	react.seed(3, new Set());
+	react.seed(4, {});
+
+	const widget = exports.Widget({ wide: true, t: (key) => key });
+	const providers = widget.props.children.find((child) => child && child.props && child.props.className === "dpu-providers");
+	const errorLine = providers.props.children[0].props.children[1].props.children[0];
+	assert.equal(errorLine.props.children, "error.no-subscription", "the line names the subscription, not the HTTP body");
+	assert.match(errorLine.props.title, /no active OpenCode GO subscription/, "the vendor's reason stays available on hover");
+	assert.match(errorLine.props.title, /error\.retry/);
 });
 
 test("the settings page reloads usage after saving and can force a refresh", async () => {
