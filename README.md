@@ -31,11 +31,16 @@ panel settings page — extended from one provider to three.
 - **GLM Code Plan, international and China** — 5-hour token window, weekly
   token window and monthly MCP tool limit, read from the international Z.ai
   host (`api.z.ai`) or the China BigModel host (`open.bigmodel.cn`) at
-  `/api/monitor/usage/quota/limit`. `auto` probes both, the GLM card badges the
-  version that answered (**International** / **China**), and the plugin
-  settings can pin one version (or a custom endpoint). When neither version
-  answers, the failure names each version's result instead of only the last
-  probe.
+  `/api/monitor/usage/quota/limit`. One key is often answered by both hosts, so
+  `auto` asks the version implied by the GLM model route configured under
+  Models first: a `zai-coding-cn` route means China, `zai` means
+  international, and the route must authenticate with the same credential the
+  quota read uses; without a matching route the credential name
+  (`ZAI_CODING_CN_API_KEY`, `BIGMODEL_API_KEY`, …) decides. The other host
+  stays the fallback, the GLM card badges the version that answered
+  (**International** / **China**), and the plugin settings can pin one version
+  (or a custom endpoint). When neither version answers, the failure names each
+  version's result instead of only the last probe.
 - **Top-up balances** — OpenCode GO shows the OpenCode Zen prepaid balance and
   Command Code shows its purchased + free "Extra Credits" balance, both as a
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
@@ -85,7 +90,8 @@ panel settings page — extended from one provider to three.
   page below.
 - **Bundle settings page** — sidebar **Plugins** panel → this bundle's card:
   enable/disable each provider, edit credential refs and endpoints, choose the
-  GLM region, and see non-network detection status. Save applies immediately.
+  GLM region (auto-detect names the inferred version, e.g. "auto-detect · China"),
+  and see non-network detection status. Save applies immediately.
   Each provider card embeds a **live usage** section — quota windows with
   percentages, time-to-reset and the top-up balance, from the same canonical
   snapshot the widget renders. While the page is open it follows the widget:
@@ -148,6 +154,13 @@ returned by the settings route and never reach the browser.
 | OpenCode GO | `OPENCODE_GO_API_KEY` | `opencodeGoApiKeyEnv`, the `dsh-opencode-go` active-account ref (only when that entry is enabled), `OPENCODE_GO_API_KEY`, `OPENCODE_API_KEY` | `GET {baseUrl}/v1/usage` |
 | Command Code | `COMMANDCODE_API_KEY` | `commandCodeApiKeyEnv`, `COMMANDCODE_API_KEY`, then the CLI auth file | `~/.commandcode/auth.json` (`apiKey`) |
 | GLM Code Plan | `ZAI_API_KEY` | `glmApiKeyEnv`, `ZAI_CODING_CN_API_KEY`, `ZAI_API_KEY`, `ZHIPU_API_KEY`, `GLM_API_KEY`, `BIGMODEL_API_KEY` | — |
+
+**Both Code Plan keys on one machine**: the default `glmApiKeyEnv` is only a
+placeholder. The plugin first uses the credential of the configured GLM model
+route (`zai-coding-cn` → China, `zai` → international), then the China-first
+order above; only a ref explicitly pinned in settings outranks the model route.
+The settings page appends "from model route" to the credential ref so you can
+tell which key answered.
 
 Set a ref in **Plugins → dsh-multi-provider-usage → settings** (or in the
 auto-generated **Settings → Plugins → Plugin configuration** form). A ref is a
@@ -368,9 +381,10 @@ the settings page and the auto-generated form hot-apply.
 | `injectSessionHeader` | `true` | OpenCode GO session-header fix |
 | `providerOrder` | all three ids | Provider display order in the widget; drag the cards in the plugin settings to reorder |
 
-`glmRegion: "custom"` requires `glmBaseUrl`; `auto` probes
-`https://api.z.ai` first and then `https://open.bigmodel.cn`, and the widget
-badges the version that answered.
+`glmRegion: "custom"` requires `glmBaseUrl`; `auto` probes the version the
+GLM model route configured under Models targets (`zai-coding-cn` →
+`https://open.bigmodel.cn`, `zai` → `https://api.z.ai`) first, falls back to
+the other host, and the widget badges the version that answered.
 
 ## HTTP API
 
@@ -475,7 +489,7 @@ Returns the settings descriptor (`namespace`, `revision`, `value`, `base`,
     "providers": {
       "opencode-go": { "configured": true, "entryFound": false, "fallback": { "...": "..." } },
       "command-code": { "configured": true, "source": "auth-file" },
-      "glm": { "configured": true, "region": "auto" }
+      "glm": { "configured": true, "region": "auto", "regionHint": "bigmodel", "regionHintFrom": "route:zai-coding-cn" }
     }
   }
 }

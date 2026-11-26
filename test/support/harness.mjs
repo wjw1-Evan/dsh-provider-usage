@@ -365,7 +365,14 @@ export function makeCtx(options = {}) {
 		get(name) {
 			return services[name];
 		},
-		fiber: { entry: { options: { id: options.entryId ?? "dsh-multi-provider-usage" } } },
+		fiber: {
+			entry: {
+				options: {
+					id: options.entryId ?? "dsh-multi-provider-usage",
+					...(options.entryConfig === undefined ? {} : { config: options.entryConfig })
+				}
+			}
+		},
 		root: {}
 	};
 	const disposeAll = () => {

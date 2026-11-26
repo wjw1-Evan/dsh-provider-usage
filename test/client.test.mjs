@@ -1344,6 +1344,101 @@ test("the GLM settings card offers the version choice and reports the detected o
 	assert.equal(react.peek(1).glmRegion, "bigmodel", "choosing a version updates the form");
 });
 
+test("the GLM settings card names the auto-detected Code Plan version", () => {
+	const exports = loadExports();
+	const value = {
+		opencodeGoEnabled: true,
+		opencodeGoApiKeyEnv: "OPENCODE_GO_API_KEY",
+		commandCodeEnabled: true,
+		commandCodeApiKeyEnv: "COMMANDCODE_API_KEY",
+		glmEnabled: true,
+		glmApiKeyEnv: "ZAI_CODING_CN_API_KEY",
+		glmRegion: "auto",
+		providerOrder: ["opencode-go", "command-code", "glm"]
+	};
+	react.reset();
+	react.seed(0, {
+		phase: "ready",
+		revision: 3,
+		value,
+		detection: {
+			providers: {
+				glm: {
+					configured: true,
+					credentialRef: "ZAI_CODING_CN_API_KEY",
+					region: "auto",
+					regionHint: "bigmodel",
+					regionHintFrom: "route:zai-coding-cn"
+				}
+			}
+		},
+		error: null
+	});
+	react.seed(1, value);
+	react.seed(2, { save: false, reload: false });
+	react.seed(3, null);
+	react.seed(4, null);
+	react.seed(5, {
+		phase: "ready",
+		at: 0,
+		data: { providers: [] },
+		error: null
+	});
+
+	const page = exports.SettingsPage({ t: (key) => key });
+	const tree = JSON.stringify(page);
+	assert.match(tree, /cfg\.status\.region: region\.auto · region\.bigmodel/, "auto mode reports the inferred China version");
+	assert.doesNotMatch(tree, /cfg\.status\.region: region\.auto"/, "auto mode is never a bare guess once the route is known");
+});
+
+test("the GLM settings card names where the answering credential came from", () => {
+	const exports = loadExports();
+	const value = {
+		opencodeGoEnabled: true,
+		opencodeGoApiKeyEnv: "OPENCODE_GO_API_KEY",
+		commandCodeEnabled: true,
+		commandCodeApiKeyEnv: "COMMANDCODE_API_KEY",
+		glmEnabled: true,
+		glmApiKeyEnv: "",
+		glmRegion: "auto",
+		providerOrder: ["opencode-go", "command-code", "glm"]
+	};
+	react.reset();
+	react.seed(0, {
+		phase: "ready",
+		revision: 3,
+		value,
+		detection: {
+			providers: {
+				glm: {
+					configured: true,
+					credentialRef: "ZAI_CODING_CN_API_KEY",
+					credentialSource: "route",
+					region: "auto",
+					regionHint: "bigmodel",
+					regionHintFrom: "route:zai-coding-cn"
+				}
+			}
+		},
+		error: null
+	});
+	react.seed(1, value);
+	react.seed(2, { save: false, reload: false });
+	react.seed(3, null);
+	react.seed(4, null);
+	react.seed(5, {
+		phase: "ready",
+		at: 0,
+		data: { providers: [] },
+		error: null
+	});
+
+	const page = exports.SettingsPage({ t: (key) => key });
+	const tree = JSON.stringify(page);
+	assert.match(tree, /ZAI_CODING_CN_API_KEY · cfg\.credential\.route/, "the status line says the model route chose the key");
+	assert.match(tree, /"placeholder":"cfg\.credential\.auto"/, "an empty credential ref advertises auto selection");
+});
+
 test("both locales name the two GLM Code Plan versions", () => {
 	const locales = [];
 	loadExports().apply({

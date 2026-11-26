@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
 	callRoute,
 	commandCodeFixture,
+	glmFixture,
 	goEntry,
 	loadHost,
 	usagePayload,
@@ -27,6 +28,7 @@ async function bootWith(overrides = {}) {
 		entries: overrides.entries ?? [],
 		services: overrides.services ?? {},
 		credentialMap: overrides.credentialMap ?? CREDS,
+		entryConfig: overrides.entryConfig,
 		port: 1234
 	});
 	const config = {
@@ -67,6 +69,112 @@ test("GET usage returns all three providers in display order", async () => {
 	];
 	assert.deepEqual(fiveHourKeys, ["window.five-hour", "window.five-hour", "window.five-hour"]);
 	assert.equal(res.body.sessionHeader.active, true);
+});
+
+/** A live llm-pi-ai entry: the GLM model route names the Code Plan version. */
+function piAiEntry(providers) {
+	return {
+		id: "llm-pi-ai",
+		options: { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
+		disabled: false,
+		fiber: { uid: 77, config: { providers } }
+	};
+}
+
+test("auto GLM asks and badges the plan its model route names", async () => {
+	const { routes, wire } = await bootWith({
+		entries: [piAiEntry({ "zai-coding-cn": { apiKeyEnv: "ZAI_CODING_CN_API_KEY" } })],
+		// The user's only GLM credential is the China plan key; both hosts answer
+		// it with the same quota, so the probe order must follow the model route.
+		credentialMap: { OPENCODE_GO_API_KEY: "sk-go", COMMANDCODE_API_KEY: "sk-cc", ZAI_CODING_CN_API_KEY: "sk-cn" },
+		wire: { glm: { zai: glmFixture(), bigmodel: glmFixture() } }
+	});
+	const res = await callRoute(routes, "/provider-usage/usage");
+	const glm = res.body.providers.find((provider) => provider.id === "glm");
+
+	assert.equal(glm.status, "ok");
+	assert.equal(glm.account.ref, "ZAI_CODING_CN_API_KEY");
+	assert.equal(glm.meta.regionKind, "bigmodel", "the China plan is badged as China even though api.z.ai answers too");
+	assert.equal(glm.meta.regionHint, "bigmodel");
+	const firstGlmCall = wire.requests.find((request) => request.url.includes("/monitor/usage/quota/limit"));
+	assert.match(firstGlmCall.url, /open\.bigmodel\.cn/, "the plan's own host is asked first");
+});
+
+test("a changed GLM model route invalidates the cached region badge", async () => {
+	const entry = piAiEntry({ zai: { apiKeyEnv: "ZAI_API_KEY" } });
+	const { ctx, routes } = await bootWith({
+		entries: [entry],
+		config: { cacheMs: 60_000 },
+		wire: { glm: { zai: glmFixture(), bigmodel: glmFixture() } }
+	});
+
+	const first = await callRoute(routes, "/provider-usage/usage");
+	assert.equal(first.body.providers.find((provider) => provider.id === "glm").meta.regionKind, "zai");
+
+	// Same credential, different route: the quota cache must not keep serving
+	// the previous version's badge.
+	entry.fiber.config.providers = { "zai-coding-cn": { apiKeyEnv: "ZAI_API_KEY" } };
+	const second = await callRoute(routes, "/provider-usage/usage");
+	assert.equal(second.body.providers.find((provider) => provider.id === "glm").meta.regionKind, "bigmodel");
+	assert.ok(ctx);
+});
+
+test("both GLM keys present: the model route's key answers instead of the default ref", async () => {
+	const { routes, wire } = await bootWith({
+		entries: [piAiEntry({ "zai-coding-cn": { apiKeyEnv: "ZAI_CODING_CN_API_KEY" } })],
+		credentialMap: {
+			OPENCODE_GO_API_KEY: "sk-go",
+			COMMANDCODE_API_KEY: "sk-cc",
+			ZAI_API_KEY: "sk-intl",
+			ZAI_CODING_CN_API_KEY: "sk-cn"
+		},
+		wire: { glm: { zai: glmFixture(), bigmodel: glmFixture() } }
+	});
+	const res = await callRoute(routes, "/provider-usage/usage");
+	const glm = res.body.providers.find((provider) => provider.id === "glm");
+
+	assert.equal(glm.status, "ok");
+	assert.equal(glm.account.ref, "ZAI_CODING_CN_API_KEY", "the route's China key wins over the schema-default ZAI_API_KEY");
+	assert.equal(glm.meta.regionKind, "bigmodel");
+	const firstGlmCall = wire.requests.find((request) => request.url.includes("/monitor/usage/quota/limit"));
+	assert.match(firstGlmCall.url, /open\.bigmodel\.cn/);
+});
+
+test("both GLM keys present without a model route: the China-first order answers", async () => {
+	const { routes } = await bootWith({
+		entries: [],
+		credentialMap: {
+			OPENCODE_GO_API_KEY: "sk-go",
+			COMMANDCODE_API_KEY: "sk-cc",
+			ZAI_API_KEY: "sk-intl",
+			ZAI_CODING_CN_API_KEY: "sk-cn"
+		},
+		wire: { glm: { zai: glmFixture(), bigmodel: glmFixture() } }
+	});
+	const res = await callRoute(routes, "/provider-usage/usage");
+	const glm = res.body.providers.find((provider) => provider.id === "glm");
+
+	assert.equal(glm.account.ref, "ZAI_CODING_CN_API_KEY", "the documented ZAI_CODING_CN_API_KEY-first order still applies");
+	assert.equal(glm.meta.regionKind, "bigmodel");
+});
+
+test("an explicitly pinned GLM credential outranks the model route", async () => {
+	const { routes } = await bootWith({
+		entries: [piAiEntry({ "zai-coding-cn": { apiKeyEnv: "ZAI_CODING_CN_API_KEY" } })],
+		entryConfig: { glmApiKeyEnv: "ZAI_API_KEY" },
+		credentialMap: {
+			OPENCODE_GO_API_KEY: "sk-go",
+			COMMANDCODE_API_KEY: "sk-cc",
+			ZAI_API_KEY: "sk-intl",
+			ZAI_CODING_CN_API_KEY: "sk-cn"
+		},
+		wire: { glm: { zai: glmFixture(), bigmodel: glmFixture() } }
+	});
+	const res = await callRoute(routes, "/provider-usage/usage");
+	const glm = res.body.providers.find((provider) => provider.id === "glm");
+
+	assert.equal(glm.account.ref, "ZAI_API_KEY", "a ref saved in settings decides, not the model route");
+	assert.equal(glm.meta.regionKind, "zai");
 });
 
 test("one broken provider does not hide the other two", async () => {

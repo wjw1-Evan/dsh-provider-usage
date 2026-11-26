@@ -26,10 +26,13 @@
   `/alpha/billing/*` 与 `/alpha/usage/summary`。
 - **GLM Code Plan（国际版 / 国内版）** — 5 小时 Token 窗口、周 Token 窗口、
   月度 MCP 工具额度，国际版读 `api.z.ai`、国内版读 `open.bigmodel.cn` 的
-  `/api/monitor/usage/quota/limit`。默认 `auto` 两个版本都探测，组件在账号旁用
-  「国际版 / 国内版」小标签标出实际生效的版本；插件设置页可选择自动 / 国际版 /
-  国内版 / 自定义接口。两个版本都失败时，错误信息分别列出各自的返回，而不是只报
-  最后一次探测。
+  `/api/monitor/usage/quota/limit`。同一个 Key 往往两个站点都能答，所以默认
+  `auto` 先按 Models 里配置的 GLM 模型线路判断买的哪个版本：`zai-coding-cn`
+  线路是国内版，`zai` 线路是国际版，且线路凭据必须与配额 Key 相同才采信；没有
+  匹配线路时按凭据名（`ZAI_CODING_CN_API_KEY`、`BIGMODEL_API_KEY` 等）判断。
+  插件先问推断出的版本，再用另一个版本兜底；组件在账号旁用「国际版 / 国内版」小
+  标签标出实际回答的版本，插件设置页可选择自动 / 国际版 / 国内版 / 自定义接口。
+  两个版本都失败时，错误信息分别列出各自的返回，而不是只报最后一次探测。
 - **订阅外充值余额** — OpenCode GO 显示 OpenCode Zen 预付费余额，Command Code 显示
   购买额度 + 免费额度的 “Extra Credits” 余额；两者都显示在账号/套餐旁，并出现在
   `/provider-usage` 文本中。OpenCode 控制台令牌依次从 `OPENCODE_CONSOLE_TOKEN`、
@@ -64,7 +67,8 @@
 - **设置快捷入口** — 组件标题栏的「设置」按钮直接打开侧边栏「插件」中的本插件
   页面，并定位到下面的配置页。
 - **插件设置页** — 侧边栏「插件」→ 本插件卡片：启用/禁用服务商、编辑凭据引用和
-  接口地址、选择 GLM 区域，并查看无网络请求的检测状态。保存后立即生效。每个服务商
+  接口地址、选择 GLM 区域（自动识别时显示推断出的版本，例如「自动识别 · 国内版」），
+  并查看无网络请求的检测状态。保存后立即生效。每个服务商
   卡片内嵌「实时用量」：显示各额度窗口的百分比、剩余重置时间与订阅外充值余额（与
   侧边栏组件同一份数据）；页面打开期间每 30 秒自动跟随刷新，并显示「更新于 HH:MM」
   时间戳；「刷新用量」按钮强制读取；保存设置（例如换了 apiKeyEnv 凭据引用）后会以
@@ -117,6 +121,11 @@ dsh plugin --profile web add /path/to/dsh-provider-usage
 | OpenCode GO | `OPENCODE_GO_API_KEY` | `opencodeGoApiKeyEnv` → `dsh-opencode-go` 当前账号引用（仅当该条目启用）→ `OPENCODE_GO_API_KEY` → `OPENCODE_API_KEY` | `GET {baseUrl}/v1/usage` |
 | Command Code | `COMMANDCODE_API_KEY` | `commandCodeApiKeyEnv` → `COMMANDCODE_API_KEY` → CLI 登录文件 | `~/.commandcode/auth.json` 中的 `apiKey` |
 | GLM Code Plan | `ZAI_API_KEY` | `glmApiKeyEnv` → `ZAI_CODING_CN_API_KEY` → `ZAI_API_KEY` → `ZHIPU_API_KEY` → `GLM_API_KEY` → `BIGMODEL_API_KEY` | — |
+
+**国内 / 国际 Key 同时存在时**：默认的 `glmApiKeyEnv` 只是占位，插件优先使用
+Models 里 GLM 模型线路所用的凭据（`zai-coding-cn` → 国内版，`zai` → 国际版），
+再按上表的国内优先顺序解析；只有在设置里显式指定的引用名才优先于模型线路。设置页
+会在凭据名后标出「跟随模型线路」，便于确认这次读到的是哪一把 Key。
 
 在「插件 → dsh-multi-provider-usage → 设置」或自动生成的「设置 → 插件 →
 插件配置」里填写引用名（例如 `OPENCODE_GO_API_KEY`），真正的密钥保存在 DSH
@@ -301,8 +310,9 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `injectSessionHeader` | `true` | OpenCode GO 会话头修复 |
 | `providerOrder` | 三个 id 全集 | 组件中的显示顺序；在插件设置里拖动卡片调整 |
 
-`glmRegion: "custom"` 必须提供 `glmBaseUrl`；`auto` 先探测
-`https://api.z.ai`，再探测 `https://open.bigmodel.cn`，组件会标出实际生效的版本。
+`glmRegion: "custom"` 必须提供 `glmBaseUrl`；`auto` 先探测 Models 中 GLM
+模型线路对应的版本（`zai-coding-cn` → `https://open.bigmodel.cn`，`zai` →
+`https://api.z.ai`），再用另一个版本兜底，组件会标出实际回答的版本。
 
 ## HTTP API
 
@@ -398,7 +408,7 @@ Command Code 部分接口失败：数字照常显示，但健康点变黄，悬�
     "providers": {
       "opencode-go": { "configured": true, "entryFound": false, "fallback": { "...": "..." } },
       "command-code": { "configured": true, "source": "auth-file" },
-      "glm": { "configured": true, "region": "auto" }
+      "glm": { "configured": true, "region": "auto", "regionHint": "bigmodel", "regionHintFrom": "route:zai-coding-cn" }
     }
   }
 }

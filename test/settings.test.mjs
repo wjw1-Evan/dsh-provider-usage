@@ -22,10 +22,10 @@ const CREDS = {
 };
 
 /** Boot one plugin instance with a fake settings service. */
-function boot({ config = {}, entries = [], credentialMap = CREDS, settings, services, port = 1234 } = {}) {
+function boot({ config = {}, entries = [], credentialMap = CREDS, settings, services, port = 1234, entryConfig } = {}) {
 	const wire = installWire({});
 	const merged = { ...(services ?? {}), ...(settings === undefined ? {} : { settings }) };
-	const { ctx, routes, commands } = makeCtx({ entries, services: merged, credentialMap, port });
+	const { ctx, routes, commands } = makeCtx({ entries, services: merged, credentialMap, port, entryConfig });
 	const resolved = config;
 	if (resolved.cacheMs === undefined) resolved.cacheMs = 0;
 	if (resolved.commandCodeAuthFile === undefined) resolved.commandCodeAuthFile = "/nonexistent/commandcode-auth.json";
@@ -65,6 +65,64 @@ test("GET settings returns the descriptor value, revision and detection", async 
 	assert.equal(detection.glm.configured, true);
 	assert.equal(detection.glm.credentialRef, "ZAI_API_KEY");
 	assert.equal(detection.glm.region, "auto", "the GLM version mode is reported");
+});
+
+test("GET settings reports the GLM version implied by the model route", async () => {
+	const settings = makeSettings({ value: DEFAULTS, revision: 1 });
+	// The China plan key is the only GLM credential, and the llm-pi-ai entry
+	// routes it through the China model route (open.bigmodel.cn).
+	const entry = {
+		id: "llm-pi-ai",
+		options: { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
+		disabled: false,
+		fiber: { uid: 7, config: { providers: { "zai-coding-cn": { apiKeyEnv: "ZAI_CODING_CN_API_KEY" } } } }
+	};
+	const { routes } = boot({
+		settings,
+		entries: [entry],
+		// Both keys are present on the machine: the China key must still be the
+		// one reported, because the GLM model route is the China route.
+		credentialMap: {
+			OPENCODE_GO_API_KEY: "sk-go",
+			COMMANDCODE_API_KEY: "sk-cc",
+			ZAI_API_KEY: "sk-intl",
+			ZAI_CODING_CN_API_KEY: "sk-cn"
+		}
+	});
+	const res = await callRoute(routes, "/provider-usage/settings");
+	const glm = res.body.detection.providers.glm;
+
+	assert.equal(glm.credentialRef, "ZAI_CODING_CN_API_KEY");
+	assert.equal(glm.credentialSource, "route", "the settings page names the model route as the key's origin");
+	assert.equal(glm.region, "auto");
+	assert.equal(glm.regionHint, "bigmodel", "the settings page can name the auto-detected version");
+	assert.equal(glm.regionHintFrom, "route:zai-coding-cn");
+});
+
+test("GET settings reports a pinned GLM credential as the configured source", async () => {
+	const settings = makeSettings({ value: DEFAULTS, revision: 1 });
+	const entry = {
+		id: "llm-pi-ai",
+		options: { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
+		disabled: false,
+		fiber: { uid: 7, config: { providers: { "zai-coding-cn": { apiKeyEnv: "ZAI_CODING_CN_API_KEY" } } } }
+	};
+	const { routes } = boot({
+		settings,
+		entries: [entry],
+		entryConfig: { glmApiKeyEnv: "ZAI_API_KEY" },
+		credentialMap: {
+			OPENCODE_GO_API_KEY: "sk-go",
+			COMMANDCODE_API_KEY: "sk-cc",
+			ZAI_API_KEY: "sk-intl",
+			ZAI_CODING_CN_API_KEY: "sk-cn"
+		}
+	});
+	const res = await callRoute(routes, "/provider-usage/settings");
+	const glm = res.body.detection.providers.glm;
+
+	assert.equal(glm.credentialRef, "ZAI_API_KEY", "a ref saved in settings wins over the route");
+	assert.equal(glm.credentialSource, "configured");
 });
 
 test("GET settings reports the OpenCode console balance source", async () => {

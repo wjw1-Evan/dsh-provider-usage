@@ -87,6 +87,127 @@ test("GLM base kinds tell the international and China versions apart", () => {
 	assert.equal(providers.glmBaseKind("https://glm.example.test"), "custom");
 });
 
+test("GLM endpoint and model-route kinds name the Code Plan version", () => {
+	assert.equal(providers.glmEndpointKind("https://api.z.ai"), "zai");
+	assert.equal(providers.glmEndpointKind("https://open.bigmodel.cn/api/anthropic"), "bigmodel");
+	assert.equal(providers.glmEndpointKind("bigmodel.cn"), "bigmodel");
+	assert.equal(providers.glmEndpointKind("https://glm.example.test/api"), null);
+	assert.equal(providers.glmEndpointKind(""), null);
+
+	assert.equal(providers.glmRouteKind("zai", ""), "zai");
+	assert.equal(providers.glmRouteKind("zai-coding-cn", ""), "bigmodel");
+	assert.equal(providers.glmRouteKind("custom", "https://api.z.ai/api/coding/paas/v4"), "zai");
+	assert.equal(providers.glmRouteKind("zai", "https://open.bigmodel.cn/api/coding/paas/v4"), "bigmodel", "an explicit base URL wins over the route name");
+	assert.equal(providers.glmRouteKind("my-glm", ""), null);
+});
+
+test("GLM credential names imply a version only when unambiguous", () => {
+	assert.equal(providers.glmCredentialKind("ZAI_CODING_CN_API_KEY"), "bigmodel");
+	assert.equal(providers.glmCredentialKind("BIGMODEL_API_KEY"), "bigmodel");
+	assert.equal(providers.glmCredentialKind("ZHIPU_API_KEY"), "bigmodel");
+	assert.equal(providers.glmCredentialKind("ZAI_API_KEY"), "zai");
+	assert.equal(providers.glmCredentialKind("GLM_API_KEY"), null);
+	assert.equal(providers.glmCredentialKind(""), null);
+});
+
+test("a GLM region hint reorders the auto probes and needs a matching route", () => {
+	assert.deepEqual(providers.glmBases({ region: "auto", regionHint: "bigmodel" }), ["https://open.bigmodel.cn", "https://api.z.ai"]);
+	assert.deepEqual(providers.glmBases({ region: "auto", regionHint: "zai" }), ["https://api.z.ai", "https://open.bigmodel.cn"]);
+	assert.deepEqual(providers.glmBases({ region: "zai", regionHint: "bigmodel" }), ["https://api.z.ai"], "a pinned version ignores the hint");
+	assert.deepEqual(providers.glmBases({ region: "auto", regionHint: "bogus" }), ["https://api.z.ai", "https://open.bigmodel.cn"]);
+
+	const routes = [
+		{ id: "zai-coding-cn", apiKeyEnv: "ZAI_CODING_CN_API_KEY" },
+		{ id: "zai", apiKeyEnv: "ZAI_API_KEY" }
+	];
+	assert.deepEqual(providers.glmRegionHint(routes, "ZAI_CODING_CN_API_KEY"), { kind: "bigmodel", source: "route:zai-coding-cn" });
+	assert.deepEqual(providers.glmRegionHint(routes, "ZAI_API_KEY"), { kind: "zai", source: "route:zai" });
+	assert.deepEqual(
+		providers.glmRegionHint([{ id: "zai", apiKeyEnv: "ZAI_API_KEY" }], "ZAI_CODING_CN_API_KEY"),
+		{ kind: "bigmodel", source: "credential" },
+		"another plan's route must not decide the version, so the credential name does"
+	);
+	assert.deepEqual(
+		providers.glmRegionHint([{ id: "proxy", apiKeyEnv: "MY_CN_KEY", baseURL: "https://open.bigmodel.cn/api/anthropic" }], "MY_CN_KEY"),
+		{ kind: "bigmodel", source: "route:proxy" }
+	);
+	assert.equal(providers.glmRegionHint(routes, ""), null, "two routes and no credential say nothing");
+	assert.equal(providers.glmRegionHint([], "GLM_API_KEY"), null, "GLM_API_KEY is ambiguous");
+	assert.match(providers.glmRouteSignature(routes), /zai-coding-cn:ZAI_CODING_CN_API_KEY:.*:bigmodel/);
+});
+
+test("readGlm asks the hinted Code Plan host first and records why", async () => {
+	const wire = installWire({ glm: { zai: glmFixture(), bigmodel: glmFixture() } });
+	const asked = [];
+	const result = await providers.readGlm({
+		config: { apiKeyEnv: "ZAI_CODING_CN_API_KEY", region: "auto" },
+		resolveCredential: resolver({ ZAI_CODING_CN_API_KEY: "sk-cn" }),
+		regionHint: async (ref) => {
+			asked.push(ref);
+			return { kind: "bigmodel", source: "route:zai-coding-cn" };
+		}
+	});
+
+	const quotaCalls = wire.requests.filter((request) => request.url.includes("/monitor/usage/quota/limit"));
+	assert.equal(quotaCalls.length, 1, "the first answering host ends the read");
+	assert.match(quotaCalls[0].url, /open\.bigmodel\.cn/, "the China host is asked first");
+	assert.deepEqual(asked, ["ZAI_CODING_CN_API_KEY"], "the hint sees the credential actually used");
+	assert.equal(result.meta.region, "https://open.bigmodel.cn");
+	assert.equal(result.meta.regionKind, "bigmodel");
+	assert.equal(result.meta.regionHint, "bigmodel");
+	assert.equal(result.meta.regionHintFrom, "route:zai-coding-cn");
+});
+
+test("readGlm leaves a pinned region alone and survives a broken hint", async () => {
+	const wire = installWire({ glm: { zai: glmFixture(), bigmodel: glmFixture() } });
+	let asked = false;
+	const pinned = await providers.readGlm({
+		config: { apiKeyEnv: "ZAI_API_KEY", region: "zai" },
+		resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" }),
+		regionHint: async () => {
+			asked = true;
+			return { kind: "bigmodel", source: "route:zai-coding-cn" };
+		}
+	});
+	assert.equal(asked, false, "a pinned version never reads the model routes");
+	assert.equal(pinned.meta.regionKind, "zai");
+	assert.equal("regionHint" in pinned.meta, false);
+
+	const broken = await providers.readGlm({
+		config: { apiKeyEnv: "ZAI_API_KEY", region: "auto" },
+		resolveCredential: resolver({ ZAI_API_KEY: "sk-glm" }),
+		regionHint: async () => { throw new Error("loader unavailable"); }
+	});
+	assert.equal(broken.meta.regionKind, "zai", "the default probe order still answers");
+	assert.ok(wire.requests.length > 0);
+});
+
+test("readGlm reads the host-ordered credential when both GLM keys exist", async () => {
+	const wire = installWire({ glm: { zai: glmFixture(), bigmodel: glmFixture() } });
+	const both = { ZAI_API_KEY: "sk-intl", ZAI_CODING_CN_API_KEY: "sk-cn" };
+
+	// The host orders the refs from the configured GLM model route: the China
+	// key answers first even though the schema default is ZAI_API_KEY.
+	const china = await providers.readGlm({
+		config: { region: "auto" },
+		refs: ["ZAI_CODING_CN_API_KEY", "ZAI_API_KEY"],
+		resolveCredential: resolver(both),
+		regionHint: async (ref) => (ref === "ZAI_CODING_CN_API_KEY" ? { kind: "bigmodel", source: "route:zai-coding-cn" } : null)
+	});
+	assert.equal(china.account.ref, "ZAI_CODING_CN_API_KEY");
+	assert.equal(china.meta.regionKind, "bigmodel");
+
+	// The international route flips the same machine to the Z.ai key.
+	const international = await providers.readGlm({
+		config: { region: "auto" },
+		refs: ["ZAI_API_KEY", "ZAI_CODING_CN_API_KEY"],
+		resolveCredential: resolver(both)
+	});
+	assert.equal(international.account.ref, "ZAI_API_KEY");
+	assert.equal(international.meta.regionKind, "zai");
+	assert.ok(wire.requests.length > 0);
+});
+
 test("readCommandCode derives the monthly, 5-hour and weekly windows", async () => {
 	installWire({ commandCode: commandCodeFixture() });
 	const result = await providers.readCommandCode({
