@@ -1873,44 +1873,117 @@ test("the GLM card shows the peak window and flips with the Beijing clock", () =
 		Date.now = () => Date.parse("2026-11-26T15:30:00+08:00");
 		const peak = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
 		assert.ok(peak !== null, "the GLM card carries a peak-hours line");
-		assert.equal(peak.props.children[0].props.children, "glm.peak.now", "a workday afternoon reads as peak");
+		assert.equal(peak.props.children[0].props.children, "peak.now", "a workday afternoon reads as peak");
 		assert.equal(peak.props.children[0].props.className, "dpu-peak-chip dpu-peak-now", "the peak chip is highlighted");
-		assert.equal(peak.props.children[1].props.children, "glm.peak.window", "the line names the window");
-		assert.match(peak.props.title, /glm\.peak\.title/, "the tooltip explains the window");
+		assert.equal(peak.props.children[1].props.children, "peak.glm.window", "the line names the window");
+		assert.match(peak.props.title, /peak\.glm\.title/, "the tooltip explains the window");
 		assert.match(peak.props.title, /15:30/, "the tooltip carries the Beijing clock");
-		assert.match(peak.props.title, /glm\.peak\.ends/, "peak names the time until it ends");
+		assert.match(peak.props.title, /peak\.ends/, "peak names the time until it ends");
 
 		Date.now = () => Date.parse("2026-11-26T09:05:00+08:00");
 		const off = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
-		assert.equal(off.props.children[0].props.children, "glm.peak.off", "a morning reads as off-peak");
+		assert.equal(off.props.children[0].props.children, "peak.off", "a morning reads as off-peak");
 		assert.equal(off.props.children[0].props.className, "dpu-peak-chip", "the off-peak chip is neutral");
 		assert.match(off.props.title, /09:05/, "the tooltip follows the clock");
-		assert.match(off.props.title, /glm\.peak\.starts/, "off-peak names the time until the window opens");
+		assert.match(off.props.title, /peak\.starts/, "off-peak names the time until the window opens");
 
 		Date.now = () => Date.parse("2026-11-28T15:30:00+08:00");
 		const weekend = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
-		assert.equal(weekend.props.children[0].props.children, "glm.peak.off", "Saturday afternoon is off-peak");
+		assert.equal(weekend.props.children[0].props.children, "peak.off", "Saturday afternoon is off-peak");
 
-		const commandCode = {
+		const opencodeGo = {
 			providers: [{
-				id: "command-code",
-				name: "Command Code",
+				id: "opencode-go",
+				name: "OpenCode GO",
 				status: "ok",
-				windows: [{ key: "monthly", labelKey: "window.monthly", percent: 20, status: "ok", resetsAt: null, windowMs: null }],
+				windows: [{ key: "rolling", labelKey: "window.five-hour", percent: 20, status: "ok", resetsAt: null, windowMs: null }],
 				meta: {}
 			}],
 			defaultProvider: "auto"
 		};
-		assert.equal(findClassName(renderWidgetData(commandCode, tt), "dpu-peak"), null, "only the GLM card carries the line");
+		assert.equal(findClassName(renderWidgetData(opencodeGo, tt), "dpu-peak"), null, "providers without a peak schedule carry no line");
 	} finally {
 		Date.now = realNow;
 	}
 });
 
-test("the settings live-usage inset carries the GLM peak-hours line", () => {
+test("Command Code DeepSeek peak state follows the UTC+8 workday windows", () => {
+	const exports = loadExports();
+	const at = (iso) => exports.commandCodePeakInfo(Date.parse(iso));
+
+	assert.equal(at("2026-11-26T08:59:00+08:00").peak, false, "08:59 is before the first window");
+	assert.equal(at("2026-11-26T08:59:00+08:00").untilNextChangeMs, 60_000);
+	assert.equal(at("2026-11-26T09:00:00+08:00").peak, true, "09:00 opens the morning window");
+	assert.equal(at("2026-11-26T09:00:00+08:00").untilNextChangeMs, 180 * 60_000, "a three-hour morning window");
+	assert.equal(at("2026-11-26T11:59:00+08:00").untilNextChangeMs, 60_000);
+	assert.equal(at("2026-11-26T12:00:00+08:00").peak, false, "12:00 closes the morning window");
+	assert.equal(at("2026-11-26T12:00:00+08:00").untilNextChangeMs, 120 * 60_000, "the afternoon window starts at 14:00");
+	assert.equal(at("2026-11-26T14:00:00+08:00").peak, true, "14:00 opens the afternoon window");
+	assert.equal(at("2026-11-26T14:00:00+08:00").untilNextChangeMs, 240 * 60_000, "a four-hour afternoon window");
+	assert.equal(at("2026-11-26T17:59:00+08:00").untilNextChangeMs, 60_000);
+	assert.equal(at("2026-11-26T18:00:00+08:00").peak, false, "18:00 closes the afternoon window");
+	assert.equal(at("2026-11-26T18:00:00+08:00").untilNextChangeMs, 15 * 3600_000, "Thursday 18:00 → Friday 09:00");
+
+	assert.equal(at("2026-11-27T18:00:00+08:00").untilNextChangeMs, 63 * 3600_000, "Friday 18:00 → Monday 09:00");
+	assert.equal(at("2026-11-28T10:00:00+08:00").peak, false, "Saturday is off-peak all day");
+	assert.equal(at("2026-11-28T10:00:00+08:00").untilNextChangeMs, 47 * 3600_000, "Saturday 10:00 → Monday 09:00");
+	assert.equal(at("2026-11-29T20:00:00+08:00").untilNextChangeMs, 13 * 3600_000, "Sunday 20:00 → Monday 09:00");
+
+	// The windows are Beijing time: 01:00 UTC is the 09:00 Beijing start.
+	assert.equal(at("2026-11-26T01:00:00Z").peak, true);
+	assert.equal(at("2026-11-26T03:59:00Z").peak, true);
+	assert.equal(at("2026-11-26T04:00:00Z").peak, false, "04:00 UTC pauses until 06:00");
+	assert.equal(at("2026-11-26T06:00:00Z").peak, true);
+	assert.equal(at("2026-11-26T10:00:00Z").peak, false, "10:00 UTC ends the DeepSeek day");
+});
+
+test("the Command Code card shows the DeepSeek peak windows", () => {
 	const exports = loadExports();
 	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
-	const provider = {
+	const ccData = {
+		providers: [{
+			id: "command-code",
+			name: "Command Code",
+			status: "ok",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 10, status: "ok", resetsAt: null, windowMs: null }],
+			meta: {}
+		}],
+		defaultProvider: "auto"
+	};
+	const realNow = Date.now;
+	try {
+		Date.now = () => Date.parse("2026-11-26T15:30:00+08:00");
+		const peak = findClassName(renderWidgetData(ccData, tt), "dpu-peak");
+		assert.ok(peak !== null, "the Command Code card carries a peak-hours line");
+		assert.equal(peak.props.children[0].props.children, "peak.now", "Thursday 15:30 is peak for DeepSeek");
+		assert.equal(peak.props.children[0].props.className, "dpu-peak-chip dpu-peak-now");
+		assert.equal(peak.props.children[1].props.children, "peak.cc.window", "the line names the DeepSeek windows");
+		assert.match(peak.props.title, /peak\.cc\.title/);
+		assert.match(peak.props.title, /15:30/, "the tooltip carries the Beijing clock");
+		assert.match(peak.props.title, /peak\.ends/);
+
+		Date.now = () => Date.parse("2026-11-26T12:30:00+08:00");
+		const between = findClassName(renderWidgetData(ccData, tt), "dpu-peak");
+		assert.equal(between.props.children[0].props.children, "peak.off", "the noon gap is off-peak");
+		assert.equal(between.props.children[0].props.className, "dpu-peak-chip");
+		assert.match(between.props.title, /peak\.starts/, "off-peak counts down to the 14:00 window");
+
+		Date.now = () => Date.parse("2026-11-28T15:30:00+08:00");
+		const weekend = findClassName(renderWidgetData(ccData, tt), "dpu-peak");
+		assert.equal(weekend.props.children[0].props.children, "peak.off", "the weekend is off-peak for DeepSeek");
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+test("the settings live-usage inset carries the peak-hours line", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const glm = {
 		id: "glm",
 		name: "GLM Code Plan",
 		status: "ok",
@@ -1918,15 +1991,41 @@ test("the settings live-usage inset carries the GLM peak-hours line", () => {
 		windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 40, status: "ok", resetsAt: null, windowMs: null }],
 		meta: { region: "https://api.z.ai", regionKind: "zai" }
 	};
+	const commandCode = {
+		id: "command-code",
+		name: "Command Code",
+		status: "ok",
+		balance: null,
+		windows: [{ key: "monthly", labelKey: "window.monthly", percent: 20, status: "ok", resetsAt: null, windowMs: null }],
+		meta: {}
+	};
+	const opencodeGo = {
+		id: "opencode-go",
+		name: "OpenCode GO",
+		status: "ok",
+		balance: null,
+		windows: [{ key: "rolling", labelKey: "window.five-hour", percent: 10, status: "ok", resetsAt: null, windowMs: null }],
+		meta: {}
+	};
 	const realNow = Date.now;
 	try {
 		Date.now = () => Date.parse("2026-11-26T15:30:00+08:00");
 		react.reset();
-		const tree = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, phase: "ready", provider }));
+		const tree = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, phase: "ready", provider: glm }));
 		assert.match(tree, /"key":"peak"/, "the inset gains a peak row");
-		assert.match(tree, /glm\.peak\.now/, "the row names the live state");
-		assert.match(tree, /glm\.peak\.window/, "the row names the window");
+		assert.match(tree, /peak\.now/, "the row names the live state");
+		assert.match(tree, /peak\.glm\.window/, "the row names the window");
 		assert.match(tree, /15:30/, "the tooltip carries the Beijing clock");
+
+		react.reset();
+		const ccTree = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, phase: "ready", provider: commandCode }));
+		assert.match(ccTree, /"key":"peak"/, "the Command Code inset gains the DeepSeek row");
+		assert.match(ccTree, /peak\.cc\.window/, "it names the DeepSeek windows");
+		assert.match(ccTree, /peak\.now/, "Thursday 15:30 is peak for DeepSeek");
+
+		react.reset();
+		const goTree = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, phase: "ready", provider: opencodeGo }));
+		assert.doesNotMatch(goTree, /"key":"peak"/, "a provider without a schedule gets no row");
 	} finally {
 		Date.now = realNow;
 	}

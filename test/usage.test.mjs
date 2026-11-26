@@ -355,6 +355,21 @@ test("the chat command names a missing OpenCode GO subscription instead of quoti
 	assert.doesNotMatch(text, /EntitlementError|subscription required/);
 });
 
+test("the chat command follows the configured provider order", async () => {
+	// The widget sorts cards by `providerOrder`; the command output must tell
+	// the same story instead of always listing the canonical order.
+	const { commands } = await bootWith({
+		config: { providerOrder: ["glm", "command-code", "opencode-go"] }
+	});
+	const command = commands.find((candidate) => candidate.name === "provider-usage");
+	const text = (await command.handler()).text;
+	const glm = text.indexOf("GLM Code Plan");
+	const cc = text.indexOf("Command Code");
+	const go = text.indexOf("OpenCode GO");
+	assert.ok(glm !== -1 && cc !== -1 && go !== -1, "all three providers render");
+	assert.ok(glm < cc && cc < go, `saved order is followed (glm ${glm} < cc ${cc} < go ${go})`);
+});
+
 test("the chat command guides API-key and expired console logins to re-authenticate", async () => {
 	const command = (booted) => booted.commands.find((candidate) => candidate.name === "provider-usage");
 	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");

@@ -23,7 +23,10 @@
   `dsh-opencode-go` 插件当前账号的 `opencodeGoUsage` 宿主服务，失败时回退到官方
   `GET /v1/usage`。
 - **Command Code** — 月度额度池、5 小时窗口、周窗口，数据来自官方
-  `/alpha/billing/*` 与 `/alpha/usage/summary`。
+  `/alpha/billing/*` 与 `/alpha/usage/summary`。卡片底部同样标出 DeepSeek 模型的
+  峰谷时段（工作日 09:00–12:00、14:00–18:00，UTC+8；0.8.11 起），并用「高峰中 / 非高峰」小
+  标签实时显示当前状态；DeepSeek 高峰全价、其余时间与周末半价，所以高峰跑 DeepSeek
+  时同样多的额度大约只能买一半请求量，悬停可看到北京时间与距离下次切换的倒计时。
 - **GLM Code Plan（国际版 / 国内版）** — 5 小时 Token 窗口、周 Token 窗口、
   月度 MCP 工具额度，国际版读 `api.z.ai`、国内版读 `open.bigmodel.cn` 的
   `/api/monitor/usage/quota/limit`。同一个 Key 往往两个站点都能答，所以默认
@@ -46,7 +49,7 @@
   灰色「无充值额度」。
 - **自动更新** — 宿主启动后以及按配置的间隔，同时向 npm registry、npmmirror 镜像与
   GitHub Release 查询，以其中报告的最新版本为准。本地 `link:`/`file:` 目录检出在
-  「main 分支、工作区干净、可严格 fast-forward」时直接 `git pull`；npm / 市场 / tarball
+  「main 分支、无已跟踪改动（未跟踪文件不影响）、可严格 fast-forward」时直接 `git pull`；npm / 市场 / tarball
   安装的副本按「npm → npmmirror → GitHub」依次尝试下载 tarball，先写临时文件再
   `rename` 覆盖 `lib/`、`package.json`、`cordis.patch.yml` 等打包文件——不会就地
   改写 pnpm store 的硬链接。两种方式完成后，运行中的宿主仍持有旧模块，所以
@@ -312,7 +315,7 @@ Loader 直接读取导出的 `Config` schema；所有字段都是 `.volatile()`�
 | `glmRegion` | `"auto"` | `auto`、`zai`、`bigmodel`、`custom` |
 | `cacheMs` | `30000` | 单个服务商的宿主缓存 TTL |
 | `updateCheck` | `true` | npm 新版本检查（24 小时） |
-| `autoUpdate` | `true` | 同时查询 npm / npmmirror / GitHub Release；干净 checkout 快进，安装包按可达的源依次下载 tarball 原地替换 |
+| `autoUpdate` | `true` | 同时查询 npm / npmmirror / GitHub Release；无已跟踪改动的 checkout 快进，安装包按可达的源依次下载 tarball 原地替换 |
 | `autoUpdateCheckHours` | `6` | 自动更新检查间隔（1–168 小时） |
 | `injectSessionHeader` | `true` | OpenCode GO 会话头修复 |
 | `providerOrder` | 三个 id 全集 | 组件中的显示顺序；在插件设置里拖动卡片调整 |

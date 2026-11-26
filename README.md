@@ -27,7 +27,12 @@ panel settings page — extended from one provider to three.
   host service, then falls back to the official `GET /v1/usage` endpoint.
 - **Command Code** — monthly credit pool, 5-hour window and weekly window from
   the official billing/usage endpoints (`/alpha/billing/*`,
-  `/alpha/usage/summary`).
+  `/alpha/usage/summary`). Its card also names the DeepSeek peak windows
+  (Mon–Fri 09:00–12:00 and 14:00–18:00, UTC+8; since 0.8.11) with a live
+  **Peak** / **Off-peak** chip; DeepSeek costs full price at peak and half price otherwise
+  (weekends are off-peak all day), so peak hours drain the credit-based windows
+  about twice as fast. Hovering shows the Beijing clock and the countdown to the
+  next switch.
 - **GLM Code Plan, international and China** — 5-hour token window, weekly
   token window and monthly MCP tool limit, read from the international Z.ai
   host (`api.z.ai`) or the China BigModel host (`open.bigmodel.cn`) at
@@ -58,7 +63,8 @@ panel settings page — extended from one provider to three.
 - **Auto-update** — on boot and every configured interval the host checks the
   npm registry, the npmmirror mirror and the GitHub release feed together and
   trusts the newest version any of them reports. A local `link:`/`file:` checkout
-  is fast-forwarded when it is on `main`, clean, and a strict fast-forward. An
+  is fast-forwarded when it is on `main`, has no tracked changes (untracked
+  files are fine), and a strict fast-forward. An
   npm / market / tarball copy updates itself: the release tarball is downloaded
   from the first source that serves it (registry → mirror → GitHub, in turn) and
   each packaged file (`lib/`, `package.json`, `cordis.patch.yml`, `docs/`) is
@@ -385,7 +391,7 @@ the settings page and the auto-generated form hot-apply.
 | `glmRegion` | `"auto"` | `auto`, `zai`, `bigmodel`, `custom` |
 | `cacheMs` | `30000` | Per-provider host cache TTL |
 | `updateCheck` | `true` | npm update check (24 h) |
-| `autoUpdate` | `true` | Check npm, npmmirror and GitHub together; fast-forward a clean checkout, otherwise replace an installed package from the first source that serves the tarball |
+| `autoUpdate` | `true` | Check npm, npmmirror and GitHub together; fast-forward a checkout without tracked changes, otherwise replace an installed package from the first source that serves the tarball |
 | `autoUpdateCheckHours` | `6` | Hours between auto-update checks (1–168) |
 | `injectSessionHeader` | `true` | OpenCode GO session-header fix |
 | `providerOrder` | all three ids | Provider display order in the widget; drag the cards in the plugin settings to reorder |

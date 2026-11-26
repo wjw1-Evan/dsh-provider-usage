@@ -42,7 +42,7 @@ function fakeGit(overrides = {}) {
 			return { stdout: value, stderr: "" };
 		}
 		if (command === "rev-parse --abbrev-ref HEAD") return { stdout: "main\n", stderr: "" };
-		if (command === "status --porcelain") return { stdout: "", stderr: "" };
+		if (command === "status --porcelain -uno") return { stdout: "", stderr: "" };
 		if (command === "fetch --quiet origin main") return { stdout: "", stderr: "" };
 		if (command === "merge-base --is-ancestor HEAD origin/main") return { stdout: "", stderr: "" };
 		if (command === "merge --ff-only origin/main") return { stdout: "Updating\n", stderr: "" };
@@ -143,7 +143,7 @@ test("applyCheckoutUpdate fast-forwards a clean main checkout", async () => {
 		assert.deepEqual(result, { updated: true, reason: null, version: "0.3.0" });
 		assert.deepEqual(git.calls, [
 			"rev-parse --abbrev-ref HEAD",
-			"status --porcelain",
+			"status --porcelain -uno",
 			"fetch --quiet origin main",
 			"merge-base --is-ancestor HEAD origin/main",
 			"merge --ff-only origin/main"
@@ -158,7 +158,7 @@ test("applyCheckoutUpdate refuses local changes, other branches and divergence",
 	try {
 		const dirty = await applyCheckoutUpdate({
 			checkout,
-			execImpl: fakeGit({ "status --porcelain": " M lib/index.js\n" }).execImpl
+			execImpl: fakeGit({ "status --porcelain -uno": " M lib/index.js\n" }).execImpl
 		});
 		assert.equal(dirty.updated, false);
 		assert.match(dirty.reason, /local changes/);
@@ -176,6 +176,22 @@ test("applyCheckoutUpdate refuses local changes, other branches and divergence",
 		});
 		assert.equal(diverged.updated, false);
 		assert.match(diverged.reason, /diverged/);
+	} finally {
+		rmSync(checkout, { recursive: true, force: true });
+	}
+});
+
+test("applyCheckoutUpdate ignores untracked files when checking for local changes", async () => {
+	// `status --porcelain -uno` excludes untracked files, so editor scratch
+	// files (`.zcode/`, `.env`, …) on disk must not read as "local changes";
+	// a tracked edit still does (covered by the refuses-local-changes test).
+	const checkout = tempDir();
+	writeFileSync(join(checkout, ".zcode"), "scratch");
+	const git = fakeGit();
+	try {
+		const result = await applyCheckoutUpdate({ checkout, execImpl: git.execImpl });
+		assert.equal(result.updated, true, "untracked scratch files do not block the fast-forward");
+		assert.ok(git.calls.includes("status --porcelain -uno"), "untracked files are excluded from the local-change check");
 	} finally {
 		rmSync(checkout, { recursive: true, force: true });
 	}
@@ -213,6 +229,22 @@ test("parseTarball reads regular files and applies pax paths", () => {
 	assert.equal(entries.get("repo-1.0.0/lib/renamed.js").toString(), "content");
 	assert.equal(entries.get("repo-1.0.0/lib/gnu-long.js").toString(), "gnu content");
 	assert.equal(entries.has("repo-1.0.0/docs"), false, "directories are skipped");
+});
+
+test("parseTarball does not leak a pax path across a non-file entry", () => {
+	// git archive and GNU tar can emit a pax header naming one entry followed
+	// by a directory; the override must die with its own entry, not rename the
+	// next file (which the updater would then write to the wrong path).
+	const pax = paxRecord("path", "repo-1.0.0/lib/wrong.js");
+	const buffer = Buffer.concat([
+		tarEntry("pax-header", pax, "x"),
+		tarEntry("repo-1.0.0/docs", "", "5"),
+		tarEntry("repo-1.0.0/lib/index.js", "real index"),
+		Buffer.alloc(1024)
+	]);
+	const entries = parseTarball(buffer);
+	assert.equal(entries.get("repo-1.0.0/lib/index.js").toString(), "real index", "the file keeps its own name");
+	assert.equal(entries.has("repo-1.0.0/lib/wrong.js"), false, "the pax path is not reused for a later file");
 });
 
 test("applyPackageUpdate replaces the packaged files and keeps unrelated ones", async () => {
