@@ -40,7 +40,11 @@ panel settings page — extended from one provider to three.
   stays the fallback, the GLM card badges the version that answered
   (**International** / **China**), and the plugin settings can pin one version
   (or a custom endpoint). When neither version answers, the failure names each
-  version's result instead of only the last probe.
+  version's result instead of only the last probe. Under the numbers the GLM
+  card names the plan's peak hours (Mon–Fri 14:00–18:00, UTC+8; since 0.8.10)
+  with a live **Peak** / **Off-peak** chip; hovering shows the Beijing clock and
+  the countdown to the next switch. The hint explains the schedule only — it
+  never changes the reported percentages.
 - **Top-up balances** — OpenCode GO shows the OpenCode Zen prepaid balance and
   Command Code shows its purchased + free "Extra Credits" balance, both as a
   badge next to the account/plan and in the `/provider-usage` text. The OpenCode
@@ -265,6 +269,11 @@ showing **Balance —**.
 from `currentValue / usage`; duplicate limits of the same type are suffixed with
 `-2` but keep the base window's label, hint and time-bar length (instead of
 becoming an "Other window").
+
+**Credit-based GLM plans (since 0.8.10)**: a `CREDIT_LIMIT` maps to the 5-hour /
+weekly window by its `unit` — the same windows as `TOKENS_LIMIT`, including
+plans that omit `number` — instead of rendering as an
+"Other window · CREDIT_LIMIT".
 
 ### OpenCode GO integration and fallback
 

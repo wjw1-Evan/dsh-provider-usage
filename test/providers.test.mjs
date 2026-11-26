@@ -557,6 +557,23 @@ test("GLM duplicate limits keep the base window labels and time bars", () => {
 	assert.equal(windows[1].windowMs, 5 * 3600e3, "and its time bar length");
 });
 
+test("GLM credit-based plans map CREDIT_LIMIT windows by unit", () => {
+	const windows = providers.normalizeGlmUsage({
+		limits: [
+			{ type: "CREDIT_LIMIT", unit: 3, percentage: 36, nextResetTime: 1795664385124 },
+			{ type: "CREDIT_LIMIT", unit: 6, percentage: 57, nextResetTime: 1796108039979 }
+		]
+	});
+	assert.deepEqual(windows.map((window) => window.key), ["five-hour", "weekly"], "credit windows keep their names");
+	assert.equal(windows[0].labelKey, "window.five-hour");
+	assert.equal(windows[0].windowMs, 5 * 3600e3, "the 5-hour time bar comes back");
+	assert.equal(windows[1].labelKey, "window.weekly");
+	assert.equal(windows[1].windowMs, 7 * 86400e3);
+	assert.equal(windows[0].note, undefined, "the raw vendor type no longer leaks into the label");
+	assert.equal(windows[0].percent, 36);
+	assert.equal(windows[1].percent, 57);
+});
+
 test("GLM accepts string percentages and derives a missing MCP percentage from used/cap", () => {
 	const windows = providers.normalizeGlmUsage({
 		limits: [

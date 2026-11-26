@@ -108,6 +108,22 @@ function findType(node, type, found = []) {
 	return found;
 }
 
+/** First element carrying this exact className in a rendered tree, or null. */
+function findClassName(node, className) {
+	if (!node || typeof node !== "object") return null;
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			const hit = findClassName(child, className);
+			if (hit !== null) return hit;
+		}
+		return null;
+	}
+	if (node.props && node.props.className !== undefined) {
+		if (node.props.className === className || node.props.className.split(" ").includes(className)) return node;
+	}
+	return findClassName(node.props && node.props.children, className);
+}
+
 // ── effectful runtime for the load/poll state machine ─────────────────────
 // The plain stub above builds elements but never runs effects, which is all
 // the render assertions need. The widget's error recovery, the settings page's
@@ -1804,5 +1820,114 @@ test("a hidden tab stops the poll chain until it becomes visible again", async (
 		net.restore();
 		resetTimers();
 		document.hidden = false;
+	}
+});
+
+test("GLM peak state follows the UTC+8 workday window", () => {
+	const exports = loadExports();
+	const at = (iso) => exports.glmPeakInfo(Date.parse(iso));
+
+	const before = at("2026-11-26T13:59:00+08:00");
+	assert.equal(before.peak, false, "13:59 is still off-peak");
+	assert.equal(before.untilNextChangeMs, 60_000, "one minute until the window opens");
+
+	const opening = at("2026-11-26T14:00:00+08:00");
+	assert.equal(opening.peak, true, "14:00 opens the window");
+	assert.equal(opening.untilNextChangeMs, 240 * 60_000, "a four-hour peak window");
+
+	assert.equal(at("2026-11-26T17:59:00+08:00").untilNextChangeMs, 60_000, "one minute until it closes");
+	assert.equal(at("2026-11-26T18:00:00+08:00").peak, false, "18:00 closes the window");
+	assert.equal(at("2026-11-26T18:00:00+08:00").untilNextChangeMs, 20 * 3600_000, "Thursday 18:00 → Friday 14:00");
+	assert.equal(at("2026-11-27T18:00:00+08:00").untilNextChangeMs, 68 * 3600_000, "Friday 18:00 waits for Monday 14:00");
+
+	assert.equal(at("2026-11-28T15:00:00+08:00").peak, false, "the weekend is off-peak");
+	assert.equal(at("2026-11-28T15:00:00+08:00").untilNextChangeMs, 47 * 3600_000, "Saturday 15:00 → Monday 14:00");
+	assert.equal(at("2026-11-29T15:00:00+08:00").untilNextChangeMs, 23 * 3600_000, "Sunday 15:00 → Monday 14:00");
+
+	// The window is Beijing time, not the host's local zone: 06:00 UTC is 14:00
+	// in UTC+8 and therefore peak, whatever zone this test runs in.
+	assert.equal(at("2026-11-26T06:00:00Z").peak, true, "06:00 UTC is the 14:00 Beijing start");
+	assert.equal(at("2026-11-26T09:59:00Z").peak, true, "09:59 UTC is 17:59 Beijing");
+	assert.equal(at("2026-11-26T10:00:00Z").peak, false, "10:00 UTC is the 18:00 Beijing end");
+});
+
+test("the GLM card shows the peak window and flips with the Beijing clock", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const glmData = {
+		providers: [{
+			id: "glm",
+			name: "GLM Code Plan",
+			status: "ok",
+			account: null,
+			plan: null,
+			fallback: null,
+			balance: null,
+			windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 12, status: "ok", resetsAt: null, windowMs: null }],
+			meta: {}
+		}],
+		defaultProvider: "auto"
+	};
+	const realNow = Date.now;
+	try {
+		Date.now = () => Date.parse("2026-11-26T15:30:00+08:00");
+		const peak = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
+		assert.ok(peak !== null, "the GLM card carries a peak-hours line");
+		assert.equal(peak.props.children[0].props.children, "glm.peak.now", "a workday afternoon reads as peak");
+		assert.equal(peak.props.children[0].props.className, "dpu-peak-chip dpu-peak-now", "the peak chip is highlighted");
+		assert.equal(peak.props.children[1].props.children, "glm.peak.window", "the line names the window");
+		assert.match(peak.props.title, /glm\.peak\.title/, "the tooltip explains the window");
+		assert.match(peak.props.title, /15:30/, "the tooltip carries the Beijing clock");
+		assert.match(peak.props.title, /glm\.peak\.ends/, "peak names the time until it ends");
+
+		Date.now = () => Date.parse("2026-11-26T09:05:00+08:00");
+		const off = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
+		assert.equal(off.props.children[0].props.children, "glm.peak.off", "a morning reads as off-peak");
+		assert.equal(off.props.children[0].props.className, "dpu-peak-chip", "the off-peak chip is neutral");
+		assert.match(off.props.title, /09:05/, "the tooltip follows the clock");
+		assert.match(off.props.title, /glm\.peak\.starts/, "off-peak names the time until the window opens");
+
+		Date.now = () => Date.parse("2026-11-28T15:30:00+08:00");
+		const weekend = findClassName(renderWidgetData(glmData, tt), "dpu-peak");
+		assert.equal(weekend.props.children[0].props.children, "glm.peak.off", "Saturday afternoon is off-peak");
+
+		const commandCode = {
+			providers: [{
+				id: "command-code",
+				name: "Command Code",
+				status: "ok",
+				windows: [{ key: "monthly", labelKey: "window.monthly", percent: 20, status: "ok", resetsAt: null, windowMs: null }],
+				meta: {}
+			}],
+			defaultProvider: "auto"
+		};
+		assert.equal(findClassName(renderWidgetData(commandCode, tt), "dpu-peak"), null, "only the GLM card carries the line");
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+test("the settings live-usage inset carries the GLM peak-hours line", () => {
+	const exports = loadExports();
+	const tt = (key, params) => (params ? key + ":" + JSON.stringify(params) : key);
+	const provider = {
+		id: "glm",
+		name: "GLM Code Plan",
+		status: "ok",
+		balance: null,
+		windows: [{ key: "five-hour", labelKey: "window.five-hour", percent: 40, status: "ok", resetsAt: null, windowMs: null }],
+		meta: { region: "https://api.z.ai", regionKind: "zai" }
+	};
+	const realNow = Date.now;
+	try {
+		Date.now = () => Date.parse("2026-11-26T15:30:00+08:00");
+		react.reset();
+		const tree = JSON.stringify(exports.UsageSection({ t: tt, enabled: true, phase: "ready", provider }));
+		assert.match(tree, /"key":"peak"/, "the inset gains a peak row");
+		assert.match(tree, /glm\.peak\.now/, "the row names the live state");
+		assert.match(tree, /glm\.peak\.window/, "the row names the window");
+		assert.match(tree, /15:30/, "the tooltip carries the Beijing clock");
+	} finally {
+		Date.now = realNow;
 	}
 });
